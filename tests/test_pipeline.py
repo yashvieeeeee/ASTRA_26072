@@ -9,6 +9,7 @@ def test_sample_pipeline_runs_without_credentials_and_marks_caveats():
     assert fused.atmospheric_state.sizes["feature"] >= 17
     assert fused.attrs["source_status"]["synthetic_lightning"]["synthetic"] is True
     assert fused.attrs["source_status"]["ground_stations_pending"]["pending"] is True
+    assert all(status["mode"] == "sample" and status["is_synthetic"] is True for status in fused.attrs["source_status"].values())
 
 def test_output_is_full_pan_india_not_a_regional_subset():
     fused = PreprocessingPipeline().run("sample")

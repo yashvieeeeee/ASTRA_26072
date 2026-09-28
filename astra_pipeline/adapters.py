@@ -36,12 +36,13 @@ class SourceAdapter(ABC):
     contract: DatasetContract
     @property
     def metadata(self) -> SourceMetadata:
-        return SourceMetadata(source=self.contract.name, mode=self._mode, is_synthetic=self.contract.is_synthetic,
+        return SourceMetadata(source=self.contract.name, mode=self._mode, is_synthetic=self.contract.is_synthetic or self._mode is Mode.sample,
           spatial_representation=self.contract.representation, variables=list(self.contract.required_variables),
           units=self.contract.required_variables, pending_source=self.contract.pending_source)
     def load(self, mode: Mode | str = Mode.sample) -> xr.Dataset:
         self._mode = Mode(mode)
         dataset = self.sample() if self._mode is Mode.sample else self.production(self._mode)
+        dataset.attrs.update({"mode": self._mode.value, "is_synthetic": self.metadata.is_synthetic})
         self.contract.validate(dataset, self.metadata)
         return dataset
     @abstractmethod

@@ -12,7 +12,9 @@ class Domain(Strict):
         if self.latitude!=LATITUDES.tolist() or self.longitude!=LONGITUDES.tolist() or self.resolution_degrees!=.25: raise ValueError("Only the full canonical 6–38N / 68–98E domain may be served")
         return self
 class SourceState(str,Enum): complete="complete"; delayed="delayed"; missing="missing"; synthetic="synthetic"; pending="pending"
-class SourceStatus(Strict): source: str; state: SourceState; observed_at: datetime|None=None; reason: str|None=None
+class SourceStatus(Strict):
+    source: str; state: SourceState; observed_at: datetime|None=None; reason: str|None=None
+    mode: str|None=None; is_synthetic: bool|None=None
 class DataStatus(Strict): overall: str; sources: list[SourceStatus]
 class ProbabilityCube(Strict):
     lead_minutes: list[int]=Field(min_length=6,max_length=6)

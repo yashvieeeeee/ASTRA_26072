@@ -5,7 +5,14 @@ from astra_pipeline.domain import LATITUDES,LONGITUDES
 
 def artifact():
     panel=[[.1]*121 for _ in range(129)]; cube=[panel]*6
-    return {"cycle_id":"cycle-1","generated_at":datetime.now(timezone.utc).isoformat(),"domain":{"latitude":LATITUDES.tolist(),"longitude":LONGITUDES.tolist()},"data_status":{"overall":"degraded","sources":[{"source":"gpm_imerg","state":"complete"},{"source":"insat_3d_3dr","state":"complete"},{"source":"synthetic_lightning","state":"synthetic","reason":"proxy"},{"source":"ground_stations_pending","state":"pending","reason":"source unresolved"},{"source":"nwp","state":"delayed","reason":"late"}]},"predictions":{"storm_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"storm_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube}},"storms":[]}
+    return {"cycle_id":"cycle-1","generated_at":datetime.now(timezone.utc).isoformat(),"domain":{"latitude":LATITUDES.tolist(),"longitude":LONGITUDES.tolist()},"data_status":{"overall":"degraded","sources":[{"source":"gpm_imerg","state":"complete","mode":"realtime","is_synthetic":False},{"source":"insat_3d_3dr","state":"complete","mode":"realtime","is_synthetic":False},{"source":"synthetic_lightning","state":"synthetic","reason":"proxy","mode":"realtime","is_synthetic":True},{"source":"ground_stations_pending","state":"pending","reason":"source unresolved","mode":"realtime","is_synthetic":False},{"source":"nwp","state":"delayed","reason":"late","mode":"realtime","is_synthetic":False}]},"predictions":{"storm_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"storm_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube}},"storms":[]}
+
+def test_complete_sample_provenance_is_rejected(tmp_path):
+    app=create_app(audit_database=str(tmp_path/'audit.db'))
+    bad=artifact(); bad["data_status"]["sources"][0].update(mode="sample",is_synthetic=True)
+    import pytest
+    with pytest.raises(ValueError, match="real"):
+        app.state.nowcast_store.publish(bad)
 
 def test_latest_refuses_missing_cycle_and_serves_full_domain(tmp_path):
     app=create_app(audit_database=str(tmp_path/'audit.db')); client=TestClient(app)

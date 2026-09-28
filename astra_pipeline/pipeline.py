@@ -20,7 +20,8 @@ class PreprocessingPipeline:
         fused = fused.assign_coords(feature=[f.name for f in features]).to_dataset(name="atmospheric_state")
         fused.attrs.update(FusedOutputMetadata(features=[str(x) for x in fused.feature.values]).model_dump(mode="json"))
         fused.attrs["source_status"] = {
-            a.contract.name: {"synthetic": a.contract.is_synthetic, "pending": a.contract.pending_source,
+            a.contract.name: {"synthetic": a.metadata.is_synthetic, "is_synthetic": a.metadata.is_synthetic,
+                              "mode": a.metadata.mode.value, "pending": a.contract.pending_source,
                               **(ds.attrs.get("source_status", {}) if a.contract.name == "insat_3d_3dr" else {})}
             for a, ds in raw
         }

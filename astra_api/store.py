@@ -11,6 +11,9 @@ class NowcastStore:
         parsed=artifact if isinstance(artifact,NowcastResponse) else NowcastResponse.model_validate(artifact)
         names={source.source for source in parsed.data_status.sources}
         if names != REQUIRED_SOURCES: raise ValueError(f"Source status must include exactly five sources; got {names}")
+        for source in parsed.data_status.sources:
+            if source.state is SourceState.complete and (source.mode == "sample" or source.is_synthetic is not False):
+                raise ValueError(f"{source.source}: a complete source must carry real (non-sample, non-synthetic) provenance")
         states={source.state for source in parsed.data_status.sources}; expected="complete" if states=={SourceState.complete} else "degraded"
         if parsed.data_status.overall not in (expected,"stale"): raise ValueError(f"overall must be {expected!r} or stale, never silently complete")
         with self._lock: self._latest=parsed

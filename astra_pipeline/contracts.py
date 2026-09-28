@@ -39,7 +39,8 @@ class DatasetContract(BaseModel):
     def validate(self, dataset: xr.Dataset, metadata: SourceMetadata) -> None:
         if metadata.source != self.name or metadata.spatial_representation != self.representation:
             raise ValueError(f"{self.name}: metadata does not match fixed contract")
-        if metadata.is_synthetic != self.is_synthetic or metadata.pending_source != self.pending_source:
+        expected_synthetic = self.is_synthetic or metadata.mode is Mode.sample
+        if metadata.is_synthetic != expected_synthetic or metadata.pending_source != self.pending_source:
             raise ValueError(f"{self.name}: synthetic/pending status changed")
         dims = {"time", "latitude", "longitude"} if self.representation == "grid" else {"time", "point"}
         if not dims.issubset(dataset.dims):
