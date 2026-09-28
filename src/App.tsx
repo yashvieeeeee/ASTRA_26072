@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchLatestNowcast, type LatestNowcastResponse } from "./api/nowcast";
+import { decideWarning, fetchWarningAudit, fetchWarningDrafts, type AuditEvent, type WarningDraft } from "./api/warnings";
 import "./entry-transition.css";
 
 type Mode = "Overview" | "Storms" | "Nowcast" | "Risk" | "Warnings" | "Infrastructure" | "Data" | "Audit";
@@ -32,6 +33,9 @@ type Storm = {
   speed: number;
   eta: number | null;
   place: string;
+  impactIndex: number;
+  attribution: Record<string, number>;
+  facilities: number;
 };
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -65,6 +69,8 @@ function toMapStorms(nowcast: LatestNowcastResponse): Storm[] {
     speed: Math.round(storm.velocity.speed_km_h),
     eta: null,
     place: storm.affected_areas.length ? storm.affected_areas.join(" · ") : "Affected-area lookup pending",
+    impactIndex: percent(storm.impact_index), attribution: storm.source_attribution,
+    facilities: storm.exposed_infrastructure.length,
   })).filter((storm) => storm.x >= 0 && storm.x <= 100 && storm.y >= 0 && storm.y <= 100);
 }
 
@@ -196,24 +202,24 @@ function AtmosphericMap({
 function NavRail({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
   return <aside className="nav-rail">
     <div className="astra-sigil"><i></i><i></i><i></i><span></span></div>
-    <div className="nav-items">{nav.map((item)=><div key={item.mode} role="button" tabIndex={0} className={`nav-item ${mode === item.mode ? "active" : ""}`} onClick={()=>setMode(item.mode)}><Icon name={item.icon}/><span>{item.mode}</span>{item.mode === "Warnings" && <b>5</b>}</div>)}</div>
+    <div className="nav-items">{nav.map((item)=><div key={item.mode} role="button" tabIndex={0} className={`nav-item ${mode === item.mode ? "active" : ""}`} onClick={()=>setMode(item.mode)}><Icon name={item.icon}/><span>{item.mode}</span></div>)}</div>
     <div className="rail-status"><span></span><em>Operational</em></div>
   </aside>;
 }
 
-function TopHud({ setMode, now }: { setMode: (m: Mode) => void; now: Date }) {
+function TopHud({ setMode, now, dataStatus }: { setMode: (m: Mode) => void; now: Date; dataStatus: string | null }) {
   return <div className="top-hud">
     <div className="identity"><div>ASTRA</div><span>AI STORM INTELLIGENCE</span></div>
-    <div className="live-context"><strong>PAN-INDIA</strong><span><i></i> LIVE</span><b>{istTime(now, true)}</b></div>
+    <div className="live-context"><strong>PAN-INDIA</strong><span><i></i> {dataStatus === "complete" ? "LIVE" : dataStatus?.toUpperCase() ?? "NO DATA"}</span><b>{istTime(now, true)}</b></div>
     <div className="top-actions"><div role="button" tabIndex={0}><Icon name="search"/></div><div role="button" tabIndex={0} onClick={()=>setMode("Warnings")}><Icon name="bell"/><i></i></div><div className="avatar">RK</div></div>
   </div>;
 }
 
-function Telemetry({ degraded }: { degraded: boolean }) {
+function Telemetry({ degraded, storms }: { degraded: boolean; storms: Storm[] }) {
   return <div className="telemetry">
-    <div><strong>24</strong><span>ACTIVE STORMS</span></div><i></i>
-    <div className="severe"><strong>05</strong><span>SEVERE</span></div><i></i>
-    <div><strong>17</strong><span>LIGHTNING CELLS</span></div>
+    <div><strong>{storms.length || "—"}</strong><span>ACTIVE STORMS</span></div><i></i>
+    <div className="severe"><strong>{storms.length ? String(storms.filter((storm)=>storm.risk === "SEVERE").length).padStart(2,"0") : "—"}</strong><span>SEVERE</span></div><i></i>
+    <div><strong>—</strong><span>LIGHTNING CELLS</span></div>
     {degraded && <div className="confidence-alert"><Icon name="info" size={14}/><span>MODEL CONFIDENCE REDUCED</span></div>}
   </div>;
 }
@@ -229,13 +235,13 @@ function LayerControl({ layers, toggle }: { layers: Set<Layer>; toggle: (l: Laye
   </div>;
 }
 
-function DataHealth({ degraded, setDegraded, now }: { degraded: boolean; setDegraded: (d: boolean) => void; now: Date }) {
+function DataHealth({ sources, now }: { sources: LatestNowcastResponse["data_status"]["sources"] | null; now: Date }) {
   const [open,setOpen]=useState(false);
   return <div className={`data-health ${open ? "open" : ""}`}>
-    <div className="data-trigger" role="button" tabIndex={0} onClick={()=>setOpen(!open)}><span>DATA</span><div><i className="live"></i><i className="live"></i><i className={degraded?"degraded":"live"}></i><i className="live"></i><i className="synthetic"></i></div><Icon name="chevron" size={13}/></div>
+    <div className="data-trigger" role="button" tabIndex={0} onClick={()=>setOpen(!open)}><span>DATA</span><div>{(sources ?? []).map((source)=><i key={source.source} className={source.state === "complete" ? "live" : source.state === "synthetic" ? "synthetic" : "degraded"}></i>)}</div><Icon name="chevron" size={13}/></div>
     {open && <div className="data-panel"><div className="data-title"><span>INPUT SOURCE HEALTH</span><b>{istTime(now)}</b></div>
-      {[["Radar","LIVE","1m"],["Satellite","LIVE","4m"],["Ground Stations",degraded?"DEGRADED":"LIVE",degraded?"30m":"2m"],["NWP","LIVE","12m"],["Lightning","SYNTHETIC","Now"]].map(([name,status,age])=><div className="source-line" key={name} role={name==="Ground Stations"?"button":undefined} tabIndex={name==="Ground Stations"?0:undefined} onClick={()=>name==="Ground Stations"&&setDegraded(!degraded)}><i className={status.toLowerCase()}></i><span>{name}</span><b className={status.toLowerCase()}>{status}</b><em>{age}</em></div>)}
-      <div className="data-foot">Select Ground Stations to demonstrate live degradation response.</div>
+      {(sources ?? []).map((source)=><div className="source-line" key={source.source}><i className={source.state === "complete" ? "live" : source.state === "synthetic" ? "synthetic" : "degraded"}></i><span>{source.source}</span><b className={source.state}>{source.state.toUpperCase()}</b><em>{source.observed_at ? istTime(new Date(source.observed_at)) : "NO DATA"}</em></div>)}
+      {!sources && <div className="data-foot">NO SOURCE HEALTH DATA</div>}
     </div>}
   </div>;
 }
@@ -245,7 +251,7 @@ function IntelligencePanel({ storm, close, degraded, openImpact }: { storm: Stor
   return <div className="intelligence-panel">
     <div className="panel-axis"></div>
     <div className="intelligence-head"><div><span>STORM INTELLIGENCE</span><strong>{storm.id}</strong></div><Action onClick={close}><Icon name="close"/></Action></div>
-    <div className="risk-line"><Mark tone={storm.risk.toLowerCase()}>{storm.risk} RISK</Mark><span>INTENSIFYING <b>↗ 18%</b></span></div>
+    <div className="risk-line"><Mark tone={storm.risk.toLowerCase()}>{storm.risk} RISK</Mark><span>TREND DATA NOT AVAILABLE</span></div>
     <div className="hero-probability"><strong>{storm.probability}<sup>%</sup></strong><span>STORM<br/>PROBABILITY</span></div>
     <div className="instrument-grid">
       <div><span>CONFIDENCE</span><strong className={degraded?"reduced":""}>{confidence}%</strong><i><b style={{width:`${confidence}%`}}></b></i></div>
@@ -261,6 +267,9 @@ function IntelligencePanel({ storm, close, degraded, openImpact }: { storm: Stor
 
 function ImpactHud({ expanded, setExpanded, selected }: { expanded: boolean; setExpanded: (x: boolean) => void; selected: Storm | null }) {
   if (!selected) return null;
+  const attribution = Object.entries(selected.attribution);
+  return <div className={`impact-hud ${expanded ? "expanded" : ""}`} role="button" tabIndex={0} onClick={()=>!expanded&&setExpanded(true)}><div className="impact-compact"><div className="impact-orbit"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34"/><circle className="score" cx="40" cy="40" r="34"/></svg><div><strong>{selected.impactIndex}</strong><span>/100</span></div></div><div><span>ASTRA IMPACT INDEX</span><strong>{selected.risk}</strong><small>{selected.facilities ? `${selected.facilities} facilities exposed` : "NO FACILITY DATA"}</small></div><Icon name="chevron"/></div>{expanded && <div className="impact-expanded" onClick={(event)=>event.stopPropagation()}><div className="impact-head"><div><span>ASTRA IMPACT INDEX</span><strong>WHY THIS RISK MATTERS</strong></div><div role="button" tabIndex={0} onClick={()=>setExpanded(false)}><Icon name="close"/></div></div><div className="impact-score-row"><div className="impact-orbit large"><div><strong>{selected.impactIndex}</strong><span>{selected.risk}</span></div></div><div className="impact-metrics"><span>CONFIDENCE <b>{selected.confidence}%</b></span><span>ETA <b>{selected.eta === null ? "NO DATA" : `${selected.eta} MIN`}</b></span><span>FACILITIES <b>{selected.facilities || "NO DATA"}</b></span></div></div><div className="attribution-title"><span>WHY THIS PREDICTION?</span><em>EXPLAINABLE AI OUTPUT</em></div>{attribution.length ? attribution.map(([name, value])=><div className="attribution" key={name}><span>{name}</span><i><b style={{width:`${percent(value)}%`}}></b></i><strong>{percent(value)}%</strong></div>) : <div className="model-disclaimer">NO SOURCE ATTRIBUTION DATA</div>}</div>}</div>;
+  /* Legacy static Figma block retained below only for CSS reference; unreachable. */
   return <div className={`impact-hud ${expanded ? "expanded" : ""}`} role="button" tabIndex={0} onClick={()=>!expanded&&setExpanded(true)}>
     <div className="impact-compact">
       <div className="impact-orbit"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34"/><circle className="score" cx="40" cy="40" r="34"/></svg><div><strong>82</strong><span>/100</span></div></div>
@@ -302,7 +311,8 @@ function ForecastTimeline({ horizon, setHorizon, playing, setPlaying, selected, 
 }
 
 type WarningState = "list" | "review" | "confirm" | "approved";
-function WarningCenter({ state, setState, returnToMap, storms }: { state: WarningState; setState: (s: WarningState) => void; returnToMap: () => void; storms: Storm[] }) {
+/** Unreachable legacy Figma preview; retained only until its CSS can be removed. */
+function LegacyMockWarningCenter({ state, setState, returnToMap, storms }: { state: WarningState; setState: (s: WarningState) => void; returnToMap: () => void; storms: Storm[] }) {
   const [message,setMessage]=useState("Severe thunderstorm activity is expected to affect Nashik, Dhule and Jalgaon districts within the next 20 minutes. Intense lightning, gusty winds and heavy rainfall are likely. Take precautionary action and monitor official IMD guidance.");
   if (state === "approved") return <div className="warning-overlay approval-state"><div className="approval-orbit"><div className="astra-sigil large"><i></i><i></i><i></i><span></span></div><div className="approval-check"><Icon name="check" size={30}/></div></div><Mark tone="mint">DECISION RECORDED</Mark><div className="approval-title">WARNING APPROVED</div><span className="approval-subtitle">Human authorization complete · Dispatch remains controlled by IMD procedure</span><div className="approval-details"><div><span>FORECASTER</span><strong>R. Kumar · Senior Forecaster</strong></div><div><span>TIME</span><strong>08:42 IST</strong></div><div><span>AUDIT ID</span><strong>ASTRA-W-02491</strong></div></div><Action primary onClick={returnToMap}>RETURN TO LIVE MAP <Icon name="arrow"/></Action></div>;
   if (state === "confirm") return <div className="warning-overlay"><div className="confirm-dialog"><div className="approval-check static"><Icon name="check" size={26}/></div><span className="micro-label">HUMAN AUTHORIZATION</span><div className="confirm-title">Approve warning?</div><p>ASTRA will record this decision in the audit trail. The warning is not automatically dispatched.</p><div><Action onClick={()=>setState("review")}>CANCEL</Action><Action primary onClick={()=>setState("approved")}>APPROVE WARNING <Icon name="check"/></Action></div></div></div>;
@@ -326,9 +336,31 @@ function WarningCenter({ state, setState, returnToMap, storms }: { state: Warnin
   return <div className="warning-overlay warning-list-overlay"><div className="overlay-head"><div><span>HUMAN-IN-THE-LOOP OPERATIONS</span><strong>WARNING CENTER</strong><p>5 AI-assisted drafts require forecaster review</p></div><div role="button" tabIndex={0} onClick={returnToMap}><Icon name="close"/></div></div><div className="warning-timeline"><i></i>{drafts.map((w,index)=><div className="warning-draft" key={w[0]}><div className="time-node"><span></span><b>08:{37-index*5}</b></div><div className="draft-main"><div><strong>{w[0]}</strong><Mark tone={w[1].toLowerCase()}>{w[1]}</Mark></div><span>{w[2]}</span></div><div className="draft-stat"><span>ETA</span><strong>{w[3]}</strong></div><div className="draft-stat"><span>IMPACT</span><strong>{w[4]}</strong></div><div className="draft-stat"><span>CONF.</span><strong>{w[5]}</strong></div><Action primary onClick={()=>setState("review")}>REVIEW <Icon name="arrow"/></Action></div>)}</div><div className="warning-policy"><Icon name="risk"/><span>ASTRA prepares warnings for human review. No warning is automatically dispatched.</span></div></div>;
 }
 
-function AuditOverlay({ close }: { close: () => void }) {
+/** Unreachable legacy Figma preview; live audit is rendered by LiveAuditOverlay. */
+function LegacyMockAuditOverlay({ close }: { close: () => void }) {
   const rows = [["08:42:11","ASTRA-W-02491","R. Kumar","APPROVED","Nashik"],["08:39:06","ASTRA-W-02491","R. Kumar","EDITED","Nashik"],["08:37:42","ASTRA-W-02491","ASTRA AI","CREATED","Nashik"],["08:31:18","ASTRA-W-02490","ASTRA AI","CREATED","Hisar"],["08:24:03","ASTRA-W-02489","A. Nair","DISMISSED","Kochi"]];
   return <div className="mode-overlay audit-overlay"><div className="overlay-head"><div><span>IMMUTABLE DECISION RECORD</span><strong>AUDIT CHRONOLOGY</strong><p>27 September 2026 · All times IST</p></div><div role="button" tabIndex={0} onClick={close}><Icon name="close"/></div></div><div className="audit-stream">{rows.map((r,i)=><div className="audit-event" key={r[0]}><span className="audit-time">{r[0]}</span><i className={r[3].toLowerCase()}></i><div><strong>{r[3]}</strong><span>{r[1]} · {r[4]}</span></div><div><span>ACTOR</span><strong>{r[2]}</strong></div><Icon name="chevron"/></div>)}</div></div>;
+}
+
+function LiveWarningCenter({ close }: { close: () => void }) {
+  const [drafts, setDrafts] = useState<WarningDraft[] | null>(null);
+  const [actor, setActor] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<WarningDraft | null>(null);
+  useEffect(() => { fetchWarningDrafts().then(setDrafts).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load warning drafts.")); }, []);
+  const decide = async (draft: WarningDraft, decision: "approve" | "edit" | "dismiss") => {
+    if (!actor.trim()) { setError("Enter your forecaster identity before recording a decision."); return; }
+    setError(null);
+    try { const saved = await decideWarning(draft.warning_id, actor.trim(), decision); setResult(saved); setDrafts((current) => current?.filter((item) => item.warning_id !== draft.warning_id) ?? []); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Warning decision was not recorded."); }
+  };
+  return <div className="warning-overlay warning-list-overlay"><div className="overlay-head"><div><span>HUMAN-IN-THE-LOOP OPERATIONS</span><strong>WARNING CENTER</strong><p>{drafts === null ? "Loading drafts" : `${drafts.length} drafts require forecaster review`}</p></div><div role="button" tabIndex={0} onClick={close}><Icon name="close"/></div></div><div className="editor-field"><span>FORECASTER ID</span><input value={actor} onChange={(event)=>setActor(event.target.value)} placeholder="Required to record a decision" /></div>{error && <div className="degraded-note">{error}</div>}{result && <div className="warning-policy"><Icon name="check"/><span>Decision recorded: {result.warning_id} is {result.status}. No warning was transmitted.</span></div>}{drafts?.length === 0 && <div className="warning-policy"><span>NO WARNING DRAFTS AVAILABLE</span></div>}<div className="warning-timeline">{drafts?.map((draft)=><div className="warning-draft" key={draft.warning_id}><div className="time-node"><span></span><b>{istTime(new Date(draft.created_at))}</b></div><div className="draft-main"><div><strong>{draft.warning_id}</strong><Mark tone="gold">{String(draft.payload.tier ?? "NO DATA").toUpperCase()}</Mark></div><span>{String(draft.payload.affected_areas ?? "NO DATA")}</span></div><div className="draft-stat"><span>STATUS</span><strong>{draft.status.toUpperCase()}</strong></div><div className="draft-stat"><span>IMPACT</span><strong>{String(draft.payload.impact_index ?? "NO DATA")}</strong></div><div className="draft-stat"><span>ETA</span><strong>{String(draft.payload.eta ?? "NO DATA")}</strong></div><div><Action danger onClick={()=>decide(draft,"dismiss")}>DISMISS</Action><Action onClick={()=>decide(draft,"edit")}><Icon name="edit"/> EDIT</Action><Action primary onClick={()=>decide(draft,"approve")}>APPROVE <Icon name="check"/></Action></div></div>)}</div></div>;
+}
+
+function LiveAuditOverlay({ close }: { close: () => void }) {
+  const [rows, setRows] = useState<AuditEvent[] | null>(null); const [error, setError] = useState<string | null>(null);
+  useEffect(() => { fetchWarningAudit().then(setRows).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load audit records.")); }, []);
+  return <div className="mode-overlay audit-overlay"><div className="overlay-head"><div><span>IMMUTABLE DECISION RECORD</span><strong>AUDIT CHRONOLOGY</strong><p>All times IST</p></div><div role="button" tabIndex={0} onClick={close}><Icon name="close"/></div></div>{error && <div className="degraded-note">{error}</div>}<div className="audit-stream">{rows?.length === 0 && <div className="warning-policy">NO AUDIT RECORDS AVAILABLE</div>}{rows?.map((row)=><div className="audit-event" key={`${row.warning_id}-${row.occurred_at}`}><span className="audit-time">{istTime(new Date(row.occurred_at), true)}</span><i className={row.decision === "approve" ? "approved" : row.decision === "dismiss" ? "dismissed" : ""}></i><div><strong>{row.decision.toUpperCase()}</strong><span>{row.warning_id}</span></div><div><span>ACTOR</span><strong>{row.actor_id}</strong></div><Icon name="chevron"/></div>)}</div></div>;
 }
 
 function LandingAtmosphere() {
@@ -421,7 +453,6 @@ export default function App() {
   const [playing,setPlaying]=useState(false);
   const [layers,setLayers]=useState<Set<Layer>>(new Set(["Probability","Lightning","Tracks"]));
   const [impactExpanded,setImpactExpanded]=useState(false);
-  const [degraded,setDegraded]=useState(true);
   const [warningState,setWarningState]=useState<WarningState>("list");
   const [nowcast,setNowcast]=useState<LatestNowcastResponse|null>(null);
   const [loadState,setLoadState]=useState<LoadState>("loading");
@@ -471,17 +502,17 @@ export default function App() {
     <AtmosphericMap storms={storms} selected={selected} setSelected={(s)=>{setSelected(s);setHorizon(0)}} horizon={horizon} layers={layers} mode={mode}/>
     <div className="vignette"></div>
     <NavRail mode={mode} setMode={chooseMode}/>
-    <TopHud setMode={chooseMode} now={now}/>
-    <Telemetry degraded={apiDegraded}/>
+    <TopHud setMode={chooseMode} now={now} dataStatus={nowcast?.data_status.overall ?? null}/>
+    <Telemetry degraded={apiDegraded} storms={storms}/>
     <div className="mode-label"><span>MODE</span><strong>{mode.toUpperCase()}</strong>{mode!=="Overview"&&<em>{mode==="Nowcast"?"FORECAST EVOLUTION":mode==="Risk"?"EXPOSURE ANALYSIS":mode==="Infrastructure"?"CRITICAL ASSETS":"INTELLIGENCE VIEW"}</em>}</div>
     <LayerControl layers={layers} toggle={toggleLayer}/>
-    <DataHealth degraded={degraded} setDegraded={setDegraded} now={now}/>
+    <DataHealth sources={nowcast?.data_status.sources ?? null} now={now}/>
     {selected && <IntelligencePanel storm={selected} close={()=>{setSelected(null);setImpactExpanded(false)}} degraded={apiDegraded} openImpact={()=>setImpactExpanded(true)}/>}
     <ImpactHud expanded={impactExpanded} setExpanded={setImpactExpanded} selected={selected}/>
     {mode==="Overview" && !selected && <div className="discovery-prompt"><Icon name={loadState==="error" ? "info" : "target"}/><div><strong>{loadState==="loading" ? "LOADING ATMOSPHERIC CYCLE" : loadState==="error" ? "LIVE CYCLE UNAVAILABLE" : loadState==="empty" ? "NO ACTIVE STORM OBJECTS" : "SELECT AN ATMOSPHERIC SYSTEM"}</strong><span>{loadState==="loading" ? "Retrieving the latest pan-India nowcast" : loadState==="error" ? loadError : loadState==="empty" ? "The latest pan-India cycle contains no tracked storms" : "Inspect movement, forecast evolution and projected impact"}</span>{loadState==="error" && <Action onClick={()=>setReloadKey((key)=>key+1)}>RETRY <Icon name="arrow"/></Action>}</div></div>}
-    {(mode==="Warnings") && <WarningCenter state={warningState} setState={setWarningState} returnToMap={returnToMap} storms={storms}/>}
-    {mode==="Audit" && <AuditOverlay close={()=>setMode("Overview")}/>}
+    {(mode==="Warnings") && <LiveWarningCenter close={returnToMap}/>} 
+    {mode==="Audit" && <LiveAuditOverlay close={()=>setMode("Overview")}/>}
     {mode!=="Warnings" && mode!=="Audit" && <ForecastTimeline horizon={horizon} setHorizon={setHorizon} playing={playing} setPlaying={setPlaying} selected={selected} cycleTime={nowcast ? new Date(nowcast.generated_at) : now}/>}
-    {mode==="Overview" && <div className="warning-beacon" role="button" tabIndex={0} onClick={()=>chooseMode("Warnings")}><Icon name="warning"/><div><strong>5 WARNINGS</strong><span>REQUIRE REVIEW</span></div><Icon name="chevron" size={14}/></div>}
+    {mode==="Overview" && <div className="warning-beacon" role="button" tabIndex={0} onClick={()=>chooseMode("Warnings")}><Icon name="warning"/><div><strong>WARNINGS</strong><span>VIEW LIVE DRAFTS</span></div><Icon name="chevron" size={14}/></div>}
   </div>;
 }
