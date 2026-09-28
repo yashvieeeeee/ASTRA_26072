@@ -9,8 +9,15 @@
     "spatial_representation": {
       "const": "point"
     },
+    "mode": {
+      "enum": [
+        "sample",
+        "historical",
+        "realtime"
+      ]
+    },
     "is_synthetic": {
-      "const": true
+      "type": "boolean"
     },
     "pending_source": {
       "const": false
@@ -30,6 +37,7 @@
   },
   "required": [
     "source",
+    "mode",
     "spatial_representation",
     "is_synthetic",
     "pending_source",
@@ -37,6 +45,43 @@
     "units"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "sample"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "is_synthetic": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "historical",
+              "realtime"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "is_synthetic": {
+            "const": true
+          }
+        }
+      }
+    }
+  ],
   "xarray_required_dimensions": [
     "time",
     "point"

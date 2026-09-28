@@ -15,6 +15,11 @@ def test_lightning_sample_does_not_claim_uncomputed_cape_precipitation_formula()
     dataset = next(adapter for adapter in default_adapters() if adapter.contract.name == "synthetic_lightning").load("sample")
     assert dataset.attrs["formula"] == "deterministic spatial-temporal sample fixture; not CAPE × precipitation_rate"
 
+def test_source_contract_requires_sample_provenance():
+    schema = GPMAdapter.contract.json_schema()
+    assert "mode" in schema["required"]
+    assert schema["allOf"][0]["then"]["properties"]["is_synthetic"]["const"] is True
+
 def test_coverage_is_reported_and_low_source_coverage_is_marked_degraded():
     fused = PreprocessingPipeline(min_valid_fraction=.5).run("sample")
     assert len(fused.attrs["fused_valid_fraction"]) == fused.sizes["time"]

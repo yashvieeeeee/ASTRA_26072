@@ -62,13 +62,16 @@ class DatasetContract(BaseModel):
             "properties": {
                 "source": {"const": self.name},
                 "spatial_representation": {"const": self.representation},
-                "is_synthetic": {"const": self.is_synthetic},
+                "mode": {"enum": [mode.value for mode in Mode]},
+                "is_synthetic": {"type": "boolean"},
                 "pending_source": {"const": self.pending_source},
                 "variables": {"type": "array", "const": list(self.required_variables)},
                 "units": {"type": "object", "const": self.required_variables},
             },
-            "required": ["source", "spatial_representation", "is_synthetic", "pending_source", "variables", "units"],
+            "required": ["source", "mode", "spatial_representation", "is_synthetic", "pending_source", "variables", "units"],
             "additionalProperties": False,
+            "allOf": [{"if": {"properties": {"mode": {"const": "sample"}}}, "then": {"properties": {"is_synthetic": {"const": True}}}},
+                       {"if": {"properties": {"mode": {"enum": ["historical", "realtime"]}}}, "then": {"properties": {"is_synthetic": {"const": self.is_synthetic}}}}],
             "xarray_required_dimensions": ["time", "latitude", "longitude"] if self.representation == "grid" else ["time", "point"],
         }
 
