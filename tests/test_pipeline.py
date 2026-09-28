@@ -15,6 +15,13 @@ def test_lightning_sample_does_not_claim_uncomputed_cape_precipitation_formula()
     dataset = next(adapter for adapter in default_adapters() if adapter.contract.name == "synthetic_lightning").load("sample")
     assert dataset.attrs["formula"] == "deterministic spatial-temporal sample fixture; not CAPE × precipitation_rate"
 
+def test_coverage_is_reported_and_low_source_coverage_is_marked_degraded():
+    fused = PreprocessingPipeline(min_valid_fraction=.5).run("sample")
+    assert len(fused.attrs["fused_valid_fraction"]) == fused.sizes["time"]
+    lightning = fused.attrs["source_status"]["synthetic_lightning"]
+    assert lightning["coverage_state"] == "degraded"
+    assert all(value < .5 for value in lightning["valid_fraction_by_frame"])
+
 def test_output_is_full_pan_india_not_a_regional_subset():
     fused = PreprocessingPipeline().run("sample")
     assert np.array_equal(fused.latitude.values, LATITUDES)

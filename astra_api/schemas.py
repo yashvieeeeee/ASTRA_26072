@@ -15,6 +15,7 @@ class SourceState(str,Enum): complete="complete"; delayed="delayed"; missing="mi
 class SourceStatus(Strict):
     source: str; state: SourceState; observed_at: datetime|None=None; reason: str|None=None
     mode: str|None=None; is_synthetic: bool|None=None
+    valid_fraction_by_frame: list[float]|None=None; coverage_state: str|None=None
 class DataStatus(Strict): overall: str; sources: list[SourceStatus]
 class ProbabilityCube(Strict):
     lead_minutes: list[int]=Field(min_length=6,max_length=6)

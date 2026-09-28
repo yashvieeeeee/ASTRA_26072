@@ -7,8 +7,10 @@ from .domain import LATITUDES, LONGITUDES, assert_pan_india
 
 class PreprocessingPipeline:
     """Lazy, schema-gated fusion onto ASTRA's non-negotiable pan-India grid."""
-    def __init__(self, adapters: list[SourceAdapter] | None = None):
+    def __init__(self, adapters: list[SourceAdapter] | None = None, min_valid_fraction: float = 0.0):
         self.adapters = adapters or default_adapters()
+        if not 0.0 <= min_valid_fraction <= 1.0: raise ValueError("min_valid_fraction must be between 0 and 1")
+        self.min_valid_fraction = min_valid_fraction
 
     def run(self, mode: Mode | str = Mode.sample) -> xr.Dataset:
         raw = [(adapter, adapter.load(mode)) for adapter in self.adapters]
@@ -20,13 +22,26 @@ class PreprocessingPipeline:
         fused = fused.assign_coords(feature=[f.name for f in features]).to_dataset(name="atmospheric_state")
         fused.attrs.update(FusedOutputMetadata(features=[str(x) for x in fused.feature.values]).model_dump(mode="json"))
         fused.attrs["source_status"] = {
-            a.contract.name: {"synthetic": a.metadata.is_synthetic, "is_synthetic": a.metadata.is_synthetic,
-                              "mode": a.metadata.mode.value, "pending": a.contract.pending_source,
-                              **(ds.attrs.get("source_status", {}) if a.contract.name == "insat_3d_3dr" else {})}
-            for a, ds in raw
+            a.contract.name: self._source_status(a, ds)
+            for a, ds in zip((adapter for adapter, _ in raw), aligned)
         }
+        fused.attrs["fused_valid_fraction"] = self._valid_fraction(fused["atmospheric_state"])
+        fused.attrs["coverage_threshold"] = self.min_valid_fraction
         assert_pan_india(fused)
         return fused
+
+    def _valid_fraction(self, data: xr.DataArray) -> list[float]:
+        spatial_dims = [dim for dim in data.dims if dim != "time"]
+        return [float(value) for value in data.notnull().mean(dim=spatial_dims).values]
+
+    def _source_status(self, adapter, dataset):
+        coverage = self._valid_fraction(dataset.to_array())
+        below_threshold = any(value < self.min_valid_fraction for value in coverage)
+        existing = dataset.attrs.get("source_status", {}) if adapter.contract.name == "insat_3d_3dr" else {}
+        return {"synthetic": adapter.metadata.is_synthetic, "is_synthetic": adapter.metadata.is_synthetic,
+                "mode": adapter.metadata.mode.value, "pending": adapter.contract.pending_source,
+                "valid_fraction_by_frame": coverage, "coverage_state": "degraded" if below_threshold else "complete",
+                **existing}
 
     def build_sequences(self, fused: xr.Dataset, input_window_minutes: int = 60) -> xr.Dataset:
         """Construct input windows; 60 minutes at 30-minute buckets is four frames inclusive."""
