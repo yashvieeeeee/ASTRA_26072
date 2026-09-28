@@ -1,12 +1,14 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import io
+import zipfile
 import numpy as np
 import pytest
 import xarray as xr
 
 from astra_pipeline.eumetsat_iodc import EUMETSATIODCDownloader, IODCStager, SatelliteSceneReader
 from astra_pipeline.domain import LATITUDES, LONGITUDES
+from scripts.ingest_eumetsat_iodc import ingest
 
 
 class SyntheticReader(SatelliteSceneReader):
@@ -70,6 +72,16 @@ def test_downloader_retries_expired_token_without_logging_secrets(tmp_path):
     metric = EUMETSATIODCDownloader(tmp_path, retries=2, backoff_seconds=0).download(product)
     assert metric and metric.bytes_downloaded == 5
     assert EUMETSATIODCDownloader(tmp_path).download(product) is None
+
+def test_existing_raw_scene_is_staged_when_download_is_reused(tmp_path):
+    product = FakeProduct("scene_2026-01-01T00:00Z")
+    downloader = EUMETSATIODCDownloader(tmp_path / "raw")
+    raw = downloader.raw_path(str(product))
+    with zipfile.ZipFile(raw, "w") as archive:
+        archive.writestr("scene_2026-01-01T00:00Z.nat", b"fixture")
+    stager = IODCStager(tmp_path / "staged", SyntheticReader())
+    ingest([product], downloader, stager)
+    assert (tmp_path / "staged" / "frames" / "scene_2026-01-01T00_00Z.nc").is_file()
 
 
 def test_missing_credentials_fails_before_eumdac_is_called(tmp_path, monkeypatch):
