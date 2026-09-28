@@ -136,7 +136,7 @@ class LightningAdapter(SourceAdapter):
     def sample(self):
         points = np.arange(12); lat=np.linspace(7,37,12); lon=np.linspace(69,97,12)
         vals=np.stack([np.maximum(0, 10-abs(lat-25))* (1+t*.1) for t in range(len(TIMES))])
-        return xr.Dataset({"lightning_proxy": (("time","point"),vals,{"units":"strikes 30min-1"})},coords={"time":TIMES,"point":points,"latitude":("point",lat),"longitude":("point",lon)},attrs={"is_synthetic":True,"formula":"CAPE x precipitation_rate"})
+        return xr.Dataset({"lightning_proxy": (("time","point"),vals,{"units":"strikes 30min-1"})},coords={"time":TIMES,"point":points,"latitude":("point",lat),"longitude":("point",lon)},attrs={"is_synthetic":True,"formula":"deterministic spatial-temporal sample fixture; not CAPE × precipitation_rate"})
 
 class GroundStationAdapter(SourceAdapter):
     contract = DatasetContract(name="ground_stations_pending", representation="point", required_variables={"temperature_2m":"K","relative_humidity":"%","surface_pressure":"Pa","wind_speed_10m":"m s-1","rainfall_rate":"mm hr-1"}, pending_source=True)
