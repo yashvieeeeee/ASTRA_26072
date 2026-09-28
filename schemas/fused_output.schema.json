@@ -1,0 +1,68 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "grid_resolution_degrees": {
+      "default": 0.25,
+      "title": "Grid Resolution Degrees",
+      "type": "number"
+    },
+    "latitude_bounds": {
+      "default": [
+        6.0,
+        38.0
+      ],
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "title": "Latitude Bounds",
+      "type": "array"
+    },
+    "longitude_bounds": {
+      "default": [
+        68.0,
+        98.0
+      ],
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "title": "Longitude Bounds",
+      "type": "array"
+    },
+    "temporal_bucket_minutes": {
+      "default": 30,
+      "title": "Temporal Bucket Minutes",
+      "type": "integer"
+    },
+    "input_window_minutes": {
+      "default": 60,
+      "title": "Input Window Minutes",
+      "type": "integer"
+    },
+    "features": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Features",
+      "type": "array"
+    }
+  },
+  "required": [
+    "features"
+  ],
+  "title": "FusedOutputMetadata",
+  "type": "object"
+}

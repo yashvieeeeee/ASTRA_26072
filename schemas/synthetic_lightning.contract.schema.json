@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ASTRA synthetic_lightning source contract",
+  "type": "object",
+  "properties": {
+    "source": {
+      "const": "synthetic_lightning"
+    },
+    "spatial_representation": {
+      "const": "point"
+    },
+    "is_synthetic": {
+      "const": true
+    },
+    "pending_source": {
+      "const": false
+    },
+    "variables": {
+      "type": "array",
+      "const": [
+        "lightning_proxy"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "const": {
+        "lightning_proxy": "strikes 30min-1"
+      }
+    }
+  },
+  "required": [
+    "source",
+    "spatial_representation",
+    "is_synthetic",
+    "pending_source",
+    "variables",
+    "units"
+  ],
+  "additionalProperties": false,
+  "xarray_required_dimensions": [
+    "time",
+    "point"
+  ]
+}

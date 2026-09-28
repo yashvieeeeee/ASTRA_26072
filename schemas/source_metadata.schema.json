@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "Mode": {
+      "enum": [
+        "sample",
+        "historical",
+        "realtime"
+      ],
+      "title": "Mode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/Mode"
+    },
+    "is_synthetic": {
+      "default": false,
+      "title": "Is Synthetic",
+      "type": "boolean"
+    },
+    "spatial_representation": {
+      "enum": [
+        "grid",
+        "point"
+      ],
+      "title": "Spatial Representation",
+      "type": "string"
+    },
+    "variables": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Variables",
+      "type": "array"
+    },
+    "units": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Units",
+      "type": "object"
+    },
+    "pending_source": {
+      "default": false,
+      "title": "Pending Source",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "source",
+    "mode",
+    "spatial_representation",
+    "variables",
+    "units"
+  ],
+  "title": "SourceMetadata",
+  "type": "object"
+}

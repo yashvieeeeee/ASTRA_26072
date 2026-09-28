@@ -1,0 +1,16 @@
+numpy>=1.26
+xarray>=2024.1
+dask[array]>=2024.1
+zarr>=2.17
+pydantic>=2.7
+scipy>=1.11
+torch>=2.2
+geopandas>=0.14
+psycopg[binary]>=3.1
+fastapi>=0.110
+uvicorn>=0.27
+pytest>=8.0
+cdsapi>=0.7
+eumdac==3.0.0
+satpy==0.58.0
+# Optional production readers: earthaccess, herbie-data

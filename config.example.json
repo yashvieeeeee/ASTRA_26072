@@ -1,0 +1,11 @@
+{
+  "satellite_provider": "eumetsat_iodc",
+  "eumetsat_iodc": {
+    "historical_url": "https://your-staged-eumetsat-iodc-archive.nc",
+    "latest_url": "https://your-staged-eumetsat-iodc-latest.nc"
+  },
+  "mosdac": {
+    "historical_url": "https://your-mosdac-archive.nc",
+    "latest_url": "https://your-mosdac-latest.nc"
+  }
+}

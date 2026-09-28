@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ASTRA nwp source contract",
+  "type": "object",
+  "properties": {
+    "source": {
+      "const": "nwp"
+    },
+    "spatial_representation": {
+      "const": "grid"
+    },
+    "is_synthetic": {
+      "const": false
+    },
+    "pending_source": {
+      "const": false
+    },
+    "variables": {
+      "type": "array",
+      "const": [
+        "cape",
+        "cin",
+        "temperature_1000",
+        "humidity_1000",
+        "u_1000",
+        "v_1000",
+        "u_500",
+        "v_500"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "const": {
+        "cape": "J kg-1",
+        "cin": "J kg-1",
+        "temperature_1000": "K",
+        "humidity_1000": "%",
+        "u_1000": "m s-1",
+        "v_1000": "m s-1",
+        "u_500": "m s-1",
+        "v_500": "m s-1"
+      }
+    }
+  },
+  "required": [
+    "source",
+    "spatial_representation",
+    "is_synthetic",
+    "pending_source",
+    "variables",
+    "units"
+  ],
+  "additionalProperties": false,
+  "xarray_required_dimensions": [
+    "time",
+    "latitude",
+    "longitude"
+  ]
+}

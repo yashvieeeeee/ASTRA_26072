@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ASTRA gpm_imerg source contract",
+  "type": "object",
+  "properties": {
+    "source": {
+      "const": "gpm_imerg"
+    },
+    "spatial_representation": {
+      "const": "grid"
+    },
+    "is_synthetic": {
+      "const": false
+    },
+    "pending_source": {
+      "const": false
+    },
+    "variables": {
+      "type": "array",
+      "const": [
+        "precipitation_rate"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "const": {
+        "precipitation_rate": "mm hr-1"
+      }
+    }
+  },
+  "required": [
+    "source",
+    "spatial_representation",
+    "is_synthetic",
+    "pending_source",
+    "variables",
+    "units"
+  ],
+  "additionalProperties": false,
+  "xarray_required_dimensions": [
+    "time",
+    "latitude",
+    "longitude"
+  ]
+}

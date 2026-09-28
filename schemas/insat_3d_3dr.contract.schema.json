@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ASTRA insat_3d_3dr source contract",
+  "type": "object",
+  "properties": {
+    "source": {
+      "const": "insat_3d_3dr"
+    },
+    "spatial_representation": {
+      "const": "grid"
+    },
+    "is_synthetic": {
+      "const": false
+    },
+    "pending_source": {
+      "const": false
+    },
+    "variables": {
+      "type": "array",
+      "const": [
+        "ir1_brightness_temperature",
+        "tir1_brightness_temperature",
+        "wv_brightness_temperature"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "const": {
+        "ir1_brightness_temperature": "K",
+        "tir1_brightness_temperature": "K",
+        "wv_brightness_temperature": "K"
+      }
+    }
+  },
+  "required": [
+    "source",
+    "spatial_representation",
+    "is_synthetic",
+    "pending_source",
+    "variables",
+    "units"
+  ],
+  "additionalProperties": false,
+  "xarray_required_dimensions": [
+    "time",
+    "latitude",
+    "longitude"
+  ]
+}

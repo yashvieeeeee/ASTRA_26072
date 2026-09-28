@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astra-data-pipeline"
+version = "0.1.0"
+description = "Pan-India ingestion and preprocessing for ASTRA"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "xarray>=2024.1", "dask[array]>=2024.1", "zarr>=2.17", "pydantic>=2.7", "scipy>=1.11", "torch>=2.2", "geopandas>=0.14", "psycopg[binary]>=3.1", "fastapi>=0.110", "uvicorn>=0.27", "eumdac==3.0.0", "satpy==0.58.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

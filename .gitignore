@@ -1,0 +1,37 @@
+# Python and local backend state
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.sqlite3
+*.sqlite
+data/
+var/
+*.zip
+*.pt
+*.pth
+*.ckpt
+.netrc
+.cdsapirc
+.eumdac/
+credentials
+credentials.*
+
+# Frontend build and local configuration
+node_modules/
+dist/
+.vite/
+.env
+.env.*
+!.env.example
+config.json
+config/config.json
+
+# Figma Make local state
+.figma/design-context/
+.plugins/
+.opencode-skills/
+.agents/
+.figma/
+brag-output/
+eumdac/
