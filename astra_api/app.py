@@ -10,7 +10,11 @@ def create_app(*, artifact_path: str|None=None, audit_database: str|None=None):
     app=FastAPI(title="ASTRA Nowcast API",version="1.0.0",openapi_url="/openapi.json",docs_url="/docs")
     store=NowcastStore(); repository=WarningRepository(audit_database or os.getenv("ASTRA_AUDIT_DB","astra_audit.sqlite3"))
     artifact=artifact_path or os.getenv("ASTRA_NOWCAST_ARTIFACT")
-    if artifact and Path(artifact).is_file: store.load_json(artifact)
+    if artifact:
+        path = Path(artifact)
+        if not path.is_file():
+            raise RuntimeError(f"ASTRA_NOWCAST_ARTIFACT must be an existing JSON file; got {path}")
+        store.load_json(path)
     app.state.nowcast_store=store; app.state.warning_repository=repository
 
     @app.get("/api/v1/nowcast/latest",response_model=NowcastResponse,responses={503:{"description":"No real Phase 3+4 cycle is published"}})

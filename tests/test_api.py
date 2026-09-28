@@ -14,6 +14,11 @@ def test_complete_sample_provenance_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="real"):
         app.state.nowcast_store.publish(bad)
 
+def test_startup_rejects_non_file_artifact_path(tmp_path):
+    import pytest
+    with pytest.raises(RuntimeError, match="existing JSON file"):
+        create_app(artifact_path=str(tmp_path / "missing.json"), audit_database=str(tmp_path / "audit.db"))
+
 def test_latest_refuses_missing_cycle_and_serves_full_domain(tmp_path):
     app=create_app(audit_database=str(tmp_path/'audit.db')); client=TestClient(app)
     assert client.get('/api/v1/nowcast/latest').status_code==503
