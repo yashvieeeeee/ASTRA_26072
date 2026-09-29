@@ -14,7 +14,7 @@ class Domain(Strict):
 class SourceState(str,Enum): complete="complete"; delayed="delayed"; missing="missing"; synthetic="synthetic"; pending="pending"
 class SourceStatus(Strict):
     source: str; state: SourceState; observed_at: datetime|None=None; reason: str|None=None
-    mode: str|None=None; is_synthetic: bool|None=None
+    mode: str|None=None; is_synthetic: bool|None=None; provider: str|None=None
     valid_fraction_by_frame: list[float]|None=None; coverage_state: str|None=None
 class DataStatus(Strict): overall: str; sources: list[SourceStatus]
 class ProbabilityCube(Strict):

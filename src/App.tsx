@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchLatestNowcast, type LatestNowcastResponse } from "./api/nowcast";
+import { provenanceFor } from "./api/provenance";
 import { decideWarning, fetchWarningAudit, fetchWarningDrafts, type AuditEvent, type WarningDraft } from "./api/warnings";
+import { fetchLightningCorroboration, LightningLookupError, type LightningCorroboration } from "./api/lightning";
+import type { Mode, Layer, Storm, StormLead } from "./types";
 import "./entry-transition.css";
 
-type Mode = "Overview" | "Storms" | "Nowcast" | "Risk" | "Warnings" | "Infrastructure" | "Data" | "Audit";
-type Layer = "Probability" | "Lightning" | "Tracks" | "Risk fields" | "Infrastructure";
 
 const istTime = (date: Date, seconds = false) => new Intl.DateTimeFormat("en-IN", {
   timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hour12: false,
@@ -22,22 +23,6 @@ function useCurrentTime() {
   }, []);
   return now;
 }
-type Storm = {
-  id: string;
-  x: number;
-  y: number;
-  risk: "SEVERE" | "HIGH" | "MODERATE" | "LOW";
-  probability: number;
-  lightning: number;
-  confidence: number;
-  speed: number;
-  eta: number | null;
-  place: string;
-  impactIndex: number;
-  attribution: Record<string, number>;
-  facilities: number;
-};
-
 type LoadState = "loading" | "ready" | "empty" | "error";
 
 const percent = (value: number) => Math.round(Math.max(0, Math.min(100, value <= 1 ? value * 100 : value)));
@@ -46,32 +31,44 @@ const riskTier = (tier: string): Storm["risk"] => {
   const normalized = tier.toUpperCase();
   return normalized === "SEVERE" || normalized === "HIGH" || normalized === "MODERATE" || normalized === "LOW" ? normalized : "LOW";
 };
+const leadAt = (storm: Storm, horizon: number) => storm.leads.find((lead) => lead.minutes === Math.max(10,horizon)) ?? storm.leads[0];
 
-function closestGridValue(cube: LatestNowcastResponse["predictions"]["lightning_probability"], domain: LatestNowcastResponse["domain"], latitude: number, longitude: number) {
-  const leadIndex = Math.max(0, cube.lead_minutes.indexOf(10));
+function gridSeries(cube: LatestNowcastResponse["predictions"]["lightning_probability"], domain: LatestNowcastResponse["domain"], latitude: number, longitude: number) {
   const latIndex = domain.latitude.reduce((best, value, index) => Math.abs(value - latitude) < Math.abs(domain.latitude[best] - latitude) ? index : best, 0);
   const lonIndex = domain.longitude.reduce((best, value, index) => Math.abs(value - longitude) < Math.abs(domain.longitude[best] - longitude) ? index : best, 0);
-  return percent(cube.values[leadIndex]?.[latIndex]?.[lonIndex] ?? 0);
+  return cube.lead_minutes.map((minutes, index) => ({ minutes, value: cube.values[index]?.[latIndex]?.[lonIndex] }));
 }
 
 function toMapStorms(nowcast: LatestNowcastResponse): Storm[] {
   const { latitude, longitude } = nowcast.domain;
   const minLatitude = Math.min(...latitude), maxLatitude = Math.max(...latitude);
   const minLongitude = Math.min(...longitude), maxLongitude = Math.max(...longitude);
-  return nowcast.storms.map((storm) => ({
+  return nowcast.storms.map((storm) => {
+    const probability=gridSeries(nowcast.predictions.storm_probability,nowcast.domain,storm.latitude,storm.longitude);
+    const lightning=gridSeries(nowcast.predictions.lightning_probability,nowcast.domain,storm.latitude,storm.longitude);
+    const confidence=gridSeries(nowcast.predictions.storm_confidence,nowcast.domain,storm.latitude,storm.longitude);
+    const leads: StormLead[]=probability.map((point,index)=>({minutes:point.minutes,probability:point.value===undefined?null:percent(point.value),lightning:lightning[index]?.value===undefined?null:percent(lightning[index].value),confidence:confidence[index]?.value===undefined?null:percent(confidence[index].value)}));
+    const initial=leads[0];
+    return ({
     id: storm.track_id,
+    latitude: storm.latitude,
+    longitude: storm.longitude,
     x: ((storm.longitude - minLongitude) / (maxLongitude - minLongitude)) * 100,
     y: ((maxLatitude - storm.latitude) / (maxLatitude - minLatitude)) * 100,
     risk: riskTier(storm.tier),
-    probability: percent(storm.probability),
-    lightning: closestGridValue(nowcast.predictions.lightning_probability, nowcast.domain, storm.latitude, storm.longitude),
-    confidence: percent(storm.confidence),
+    probability: initial?.probability ?? percent(storm.probability),
+    lightning: initial?.lightning ?? 0,
+    confidence: initial?.confidence ?? percent(storm.confidence),
     speed: Math.round(storm.velocity.speed_km_h),
+    directionDegrees: storm.velocity.direction_degrees,
+    motionSpeedKmH: storm.velocity.speed_km_h,
+    trend: storm.trend || "TREND UNAVAILABLE",
     eta: null,
     place: storm.affected_areas.length ? storm.affected_areas.join(" · ") : "Affected-area lookup pending",
     impactIndex: percent(storm.impact_index), attribution: storm.source_attribution,
-    facilities: storm.exposed_infrastructure.length,
-  })).filter((storm) => storm.x >= 0 && storm.x <= 100 && storm.y >= 0 && storm.y <= 100);
+    facilities: storm.exposed_infrastructure.length, leads,
+  });
+  }).filter((storm) => storm.x >= 0 && storm.x <= 100 && storm.y >= 0 && storm.y <= 100);
 }
 
 const nav: { mode: Mode; icon: string }[] = [
@@ -113,8 +110,8 @@ function Icon({ name, size = 19 }: { name: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{p[name]}</svg>;
 }
 
-function Action({ children, onClick, primary, danger, className = "" }: { children: React.ReactNode; onClick?: () => void; primary?: boolean; danger?: boolean; className?: string }) {
-  return <div role="button" tabIndex={0} className={`action ${primary ? "primary" : ""} ${danger ? "danger" : ""} ${className}`} onClick={onClick} onKeyDown={(e) => e.key === "Enter" && onClick?.()}>{children}</div>;
+function Action({ children, onClick, primary, danger, className = "", ariaLabel }: { children: React.ReactNode; onClick?: () => void; primary?: boolean; danger?: boolean; className?: string; ariaLabel?: string }) {
+  return <button type="button" aria-label={ariaLabel} className={`action ${primary ? "primary" : ""} ${danger ? "danger" : ""} ${className}`} onClick={onClick}>{children}</button>;
 }
 
 function Mark({ children, tone = "violet" }: { children: React.ReactNode; tone?: string }) {
@@ -125,6 +122,17 @@ function Mark({ children, tone = "violet" }: { children: React.ReactNode; tone?:
 // Derived from the public-domain country boundary published by world.geo.json.
 const indiaPath = "M117.9 26.7L129.9 41.6L128.7 51.9L133.2 58.4L132.8 64.8L124.8 63.1L127.9 77.1L138.9 85.1L154.4 93.9L147.3 99.7L143.0 111.5L153.8 116.3L164.3 122.5L178.9 129.6L194.2 131.2L200.6 137.7L209.3 138.9L222.7 141.8L232.0 141.6L233.3 136.6L231.8 128.6L232.7 123.1L239.5 120.5L240.4 130.4L240.7 133.0L250.8 137.8L257.8 135.8L267.3 136.6L276.4 136.3L277.2 128.5L272.6 124.5L281.6 122.9L291.8 113.5L304.7 105.4L314.0 108.5L322.0 103.2L327.2 111.0L323.4 116.4L335.5 118.3L336.3 123.0L332.4 125.4L333.3 133.2L325.3 130.9L310.9 139.6L311.2 146.9L305.1 157.5L304.5 163.6L299.5 174.1L290.8 171.2L290.4 184.3L287.8 188.6L289.0 194.0L283.5 197.0L277.6 176.9L274.5 176.9L272.7 185.0L266.6 178.5L270.1 171.3L275.1 170.5L280.2 159.8L273.8 157.7L263.4 157.9L252.8 156.1L251.8 147.3L246.5 146.7L237.6 141.2L233.7 149.8L241.7 156.5L234.8 161.2L232.3 165.8L239.1 169.2L237.2 176.9L241.1 186.4L242.9 196.8L241.3 201.4L233.7 201.3L219.9 203.9L220.5 213.4L214.6 220.9L198.5 229.4L186.0 244.3L177.6 252.3L166.5 260.6L166.5 266.4L160.9 269.5L150.8 274.0L145.6 274.7L142.3 284.4L144.6 300.8L145.2 311.3L140.5 323.4L140.4 344.9L134.6 345.5L129.6 355.1L133.0 359.3L122.8 362.9L119.0 371.5L114.5 375.1L104.0 363.3L98.8 345.6L94.5 332.8L90.6 326.8L84.7 314.7L81.9 298.8L80.0 290.9L69.8 273.6L65.2 249.0L61.8 232.8L61.9 217.5L59.7 205.7L43.5 213.2L35.6 211.7L21.0 196.4L26.4 191.8L23.1 186.8L10.0 176.1L17.4 167.6L42.0 167.7L39.8 156.8L33.5 150.4L32.2 140.6L24.9 135.0L37.2 121.7L50.2 122.7L61.9 109.4L68.9 96.5L79.7 83.8L79.5 74.8L89.1 67.5L80.0 61.3L76.2 52.7L72.2 41.6L77.7 36.1L94.6 39.2L107.1 37.4L117.9 26.7Z";
 
+const projectIndia = (latitude: number, longitude: number) => ({ x: 55 + ((longitude - 68) / 30) * 280, y: 375 - ((latitude - 6) / 32) * 350 });
+const LIGHTNING_ACTIVITY_THRESHOLD = 65;
+const stormPositionAt = (storm: Storm, horizonMinutes: number) => {
+  const distanceKm = storm.motionSpeedKmH * horizonMinutes / 60;
+  const direction = storm.directionDegrees * Math.PI / 180;
+  const latitude = storm.latitude + distanceKm * Math.cos(direction) / 111.32;
+  const longitude = storm.longitude + distanceKm * Math.sin(direction) / (111.32 * Math.cos(storm.latitude * Math.PI / 180));
+  return projectIndia(latitude, longitude);
+};
+const cityPoints = [[28.61,77.21,"DELHI"],[23.02,72.57,"AHMEDABAD"],[19.08,72.88,"MUMBAI"],[21.15,79.09,"NAGPUR"],[22.57,88.36,"KOLKATA"],[12.97,77.59,"BENGALURU"],[13.08,80.27,"CHENNAI"],[17.39,78.49,"HYDERABAD"],[26.14,91.74,"GUWAHATI"]] as const;
+
 function AtmosphericMap({
   storms,
   selected,
@@ -132,6 +140,7 @@ function AtmosphericMap({
   horizon,
   layers,
   mode,
+  sources = [],
 }: {
   storms: Storm[];
   selected: Storm | null;
@@ -139,7 +148,9 @@ function AtmosphericMap({
   horizon: number;
   layers: Set<Layer>;
   mode: Mode;
+  sources?: LatestNowcastResponse["data_status"]["sources"];
 }) {
+  const lightningSource=provenanceFor(sources,"lightning");
   return <div className={`atmosphere-map ${selected ? "has-selection" : ""} mode-${mode.toLowerCase()}`}>
     <div className="aurora aurora-a"></div><div className="aurora aurora-b"></div>
     <div className="cloud-field cloud-a"></div><div className="cloud-field cloud-b"></div>
@@ -159,38 +170,38 @@ function AtmosphericMap({
         <path d="M46 171q80-52 192-12M59 192q93-44 179-9M79 233q67-29 143-8M99 276q52-14 103-2M120 319q31-4 60 5"/>
         <path d="M91 94q54 28 116-26M67 145q85 33 182-23M112 65q10 52 42 68M211 67q-29 45-57 66"/>
       </g>
-      <g className="state-lines" fill="none" stroke="var(--state-line)" strokeWidth=".65">
-        <path d="M83 116l69 16 57-66M67 146l78 25 99-18M61 190l90 10 89-19M82 232l72-3 64-4M105 278l66-11 36-18M130 337l45-24 11-10M145 171l-2 190M110 65l42 67M210 66l-58 66M245 153l-94 47M207 246l-53-17M286 94l24 26"/>
-      </g>
       <g className="city-labels">
-        {[[132,91,"DELHI"],[98,186,"AHMEDABAD"],[105,237,"MUMBAI"],[174,206,"NAGPUR"],[264,214,"KOLKATA"],[154,322,"BENGALURU"],[168,372,"CHENNAI"],[149,252,"HYDERABAD"],[302,112,"GUWAHATI"]].map(([x,y,n])=><g key={n as string}><circle cx={x as number} cy={y as number} r="1.5"/><text x={(x as number)+5} y={(y as number)+2}>{n}</text></g>)}
+        {cityPoints.map(([lat,lon,n])=>{const point=projectIndia(lat,lon);return <g key={n}><circle cx={point.x} cy={point.y} r="1.5"/><text x={point.x+5} y={point.y+2}>{n}</text></g>})}
       </g>
       {layers.has("Risk fields") && <g className="risk-wash"><ellipse cx="126" cy="220" rx="66" ry="42"/><ellipse cx="297" cy="124" rx="47" ry="29"/></g>}
       {storms.map((s, index) => {
-        const progress = selected?.id === s.id ? horizon / 60 : 0;
-        const cx = s.x * 3.35 + 8 + progress * 24;
-        const cy = s.y * 4.05 - 5 - progress * 17;
-        const baseX = s.x * 3.35 + 8;
-        const baseY = s.y * 4.05 - 5;
+        const progress = horizon / 60;
+        const mapPoint = projectIndia(s.latitude, s.longitude);
+        const motionPoint = stormPositionAt(s, horizon);
+        const forecastPoint = stormPositionAt(s, 60);
+        const cx = motionPoint.x;
+        const cy = motionPoint.y;
+        const baseX = mapPoint.x;
+        const baseY = mapPoint.y;
         const gradient = s.risk === "SEVERE" ? "url(#fieldSevere)" : s.risk === "HIGH" ? "url(#fieldHigh)" : "url(#fieldModerate)";
         return <g key={s.id} className={`storm-system ${selected?.id === s.id ? "selected" : ""}`} role="button" tabIndex={0} onClick={() => setSelected(s)}>
           {layers.has("Probability") && <><ellipse cx={cx} cy={cy} rx={s.risk === "SEVERE" ? 45 + progress * 8 : 35 + progress * 7} ry={s.risk === "SEVERE" ? 34 + progress * 6 : 29 + progress * 6} fill={gradient} className="probability-field"/><ellipse cx={cx-7} cy={cy+7} rx="20" ry="13" fill={gradient} opacity=".66"/></>}
-          {layers.has("Lightning") && s.lightning > 65 && <g className={`lightning-burst delay-${index % 3}`} transform={`translate(${cx-4} ${cy-11})`}><path d="m3 0-5 8h4l-2 7 7-10H3Z"/></g>}
+          {layers.has("Lightning") && s.lightning >= LIGHTNING_ACTIVITY_THRESHOLD && <g className={`lightning-activity delay-${index % 3}`} transform={`translate(${cx} ${cy})`}><circle r="14"/><circle r="8"/><path d="m2-10-7 12h6l-2 9 8-13H1Z"/></g>}
           {selected?.id === s.id && layers.has("Tracks") && <g className="trajectory">
             <path className="past-track" d={`M${baseX-45} ${baseY+32} Q${baseX-22} ${baseY+16} ${baseX} ${baseY}`}/>
-            <path className="uncertainty" d={`M${baseX} ${baseY} Q${baseX+48} ${baseY-22} ${baseX+85+horizon*.28} ${baseY-65-horizon*.08} L${baseX+81+horizon*.28} ${baseY-40+horizon*.15} Q${baseX+40} ${baseY-12} ${baseX} ${baseY}Z`}/>
-            <path className="forecast-track" d={`M${baseX} ${baseY} Q${baseX+48} ${baseY-22} ${baseX+83+horizon*.28} ${baseY-52}`}/>
-            {[.25,.52,.78,1].map((n)=><circle key={n} cx={baseX+(83+horizon*.28)*n} cy={baseY-52*n+(n-.5)*8} r="2.5"/>)}
+            <path className="uncertainty" d={`M${baseX} ${baseY} L${forecastPoint.x+8} ${forecastPoint.y-7} L${forecastPoint.x-8} ${forecastPoint.y+7}Z`}/>
+            <path className="forecast-track" d={`M${baseX} ${baseY} L${forecastPoint.x} ${forecastPoint.y}`}/>
+            {[.25,.52,.78,1].map((n)=><circle key={n} cx={baseX+(forecastPoint.x-baseX)*n} cy={baseY+(forecastPoint.y-baseY)*n} r="2.5"/>)}
             <g className="vector-label" transform={`translate(${baseX+48} ${baseY-48})`}><rect x="-4" y="-11" width="70" height="20" rx="3"/><text x="3" y="2">{s.speed} KM/H · NE</text></g>
           </g>}
           <circle cx={cx} cy={cy} r={selected?.id === s.id ? 10 : 6} className="centroid-halo"/>
           <circle cx={cx} cy={cy} r="2.6" className="centroid"/>
           <g className="storm-id" transform={`translate(${cx+10} ${cy-14})`}><text>{s.id}</text></g>
-          <g className="storm-tooltip" transform={`translate(${cx+12} ${cy+8})`}><rect width="95" height="50" rx="4"/><text x="8" y="14" className={`risk-${s.risk.toLowerCase()}`}>{s.risk}</text><text x="8" y="29">{s.probability}% PROBABILITY</text><text x="8" y="42">NE → {s.speed} KM/H</text></g>
+          <g className="storm-tooltip" transform={`translate(${cx+12} ${cy+8})`}><rect width="180" height="64" rx="4"/><text x="8" y="14" className={`risk-${s.risk.toLowerCase()}`}>{s.risk}</text><text x="8" y="29">{s.probability}% PROBABILITY</text><text x="8" y="42">NE → {s.speed} KM/H</text><text x="8" y="55">{lightningSource.slice(0,38)}</text></g>
         </g>;
       })}
       {layers.has("Infrastructure") && <g className="facilities">
-        {[[119,216,"H"],[135,222,"R"],[155,278,"+"],[260,218,"H"],[133,105,"A"],[303,119,"E"]].map(([x,y,t],i)=><g key={i} transform={`translate(${x} ${y})`}><circle r="8"/><text textAnchor="middle" y="2.5">{t}</text>{selected && i < 2 && <path d={`M0 0 Q${-12-i*10} ${-18-i*4} ${-24-i*16} ${-28-i*10}`} className="facility-link"/>}</g>)}
+        {[[19.99,73.79,"H"],[19.9,75.35,"R"],[13.2,77.71,"+"],[22.65,88.45,"H"],[28.56,77.1,"A"],[26.15,91.75,"E"]].map(([lat,lon,t],i)=>{const point=projectIndia(lat as number,lon as number); return <g key={i} transform={`translate(${point.x} ${point.y})`}><circle r="8"/><text textAnchor="middle" y="2.5">{t}</text>{selected && i < 2 ? <path d={`M0 0 Q${-12-i*10} ${-18-i*4} ${-24-i*16} ${-28-i*10}`} className="facility-link"/> : null}</g>})}
       </g>}
     </svg>
     <div className="map-domain"><span>38°N</span><span>INDIA · 6–38°N / 68–98°E</span><span>6°N</span></div>
@@ -199,27 +210,30 @@ function AtmosphericMap({
   </div>;
 }
 
-function NavRail({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
+function NavRail({ mode, setMode, warningCount }: { mode: Mode; setMode: (m: Mode) => void; warningCount: number }) {
   return <aside className="nav-rail">
     <div className="astra-sigil"><i></i><i></i><i></i><span></span></div>
-    <div className="nav-items">{nav.map((item)=><div key={item.mode} role="button" tabIndex={0} className={`nav-item ${mode === item.mode ? "active" : ""}`} onClick={()=>setMode(item.mode)}><Icon name={item.icon}/><span>{item.mode}</span></div>)}</div>
+    <div className="nav-items">{nav.map((item)=><div key={item.mode} role="button" tabIndex={0} className={`nav-item ${mode === item.mode ? "active" : ""}`} onClick={()=>setMode(item.mode)}><Icon name={item.icon}/><span>{item.mode}</span>{item.mode === "Warnings" && warningCount > 0 && <b>{warningCount}</b>}</div>)}</div>
     <div className="rail-status"><span></span><em>Operational</em></div>
   </aside>;
 }
 
-function TopHud({ setMode, now, dataStatus }: { setMode: (m: Mode) => void; now: Date; dataStatus: string | null }) {
+function TopHud({ setMode, now, dataStatus, openSearch, warningCount }: { setMode: (m: Mode) => void; now: Date; dataStatus: string | null; openSearch: () => void; warningCount: number }) {
+  const [menu,setMenu]=useState(false);
   return <div className="top-hud">
     <div className="identity"><div>ASTRA</div><span>AI STORM INTELLIGENCE</span></div>
-    <div className="live-context"><strong>PAN-INDIA</strong><span><i></i> {dataStatus === "complete" ? "LIVE" : dataStatus?.toUpperCase() ?? "NO DATA"}</span><b>{istTime(now, true)}</b></div>
-    <div className="top-actions"><div role="button" tabIndex={0}><Icon name="search"/></div><div role="button" tabIndex={0} onClick={()=>setMode("Warnings")}><Icon name="bell"/><i></i></div><div className="avatar">RK</div></div>
+    <div className="live-context"><strong>PAN-INDIA</strong><span><i></i> {dataStatus === "demo" ? "DEMO DATA" : dataStatus === "complete" ? "LIVE" : dataStatus?.toUpperCase() ?? "NO DATA"}</span><b>{istTime(now, true)}</b></div>
+    <div className="top-actions"><button type="button" aria-label="Search storms, districts, and warnings" onClick={openSearch}><Icon name="search"/></button><button type="button" aria-label={`Open ${warningCount} warning drafts`} onClick={()=>setMode("Warnings")}><Icon name="bell"/>{warningCount>0&&<i/>}</button><button type="button" className="avatar" aria-label="Open user menu" onClick={()=>setMenu(!menu)}>RK</button>{menu&&<div className="avatar-menu"><strong>R. Kumar</strong><span>Senior Forecaster</span><button type="button" onClick={()=>setMenu(false)}>Sign out (placeholder)</button></div>}</div>
   </div>;
 }
 
 function Telemetry({ degraded, storms }: { degraded: boolean; storms: Storm[] }) {
+  const lightningCells = storms.filter((storm) => storm.lightning >= 65).length;
   return <div className="telemetry">
     <div><strong>{storms.length || "—"}</strong><span>ACTIVE STORMS</span></div><i></i>
     <div className="severe"><strong>{storms.length ? String(storms.filter((storm)=>storm.risk === "SEVERE").length).padStart(2,"0") : "—"}</strong><span>SEVERE</span></div><i></i>
     <div><strong>—</strong><span>LIGHTNING CELLS</span></div>
+    <div className="lightning-count"><strong>{storms.length ? String(lightningCells).padStart(2,"0") : "—"}</strong><span>LIGHTNING CELLS</span></div>
     {degraded && <div className="confidence-alert"><Icon name="info" size={14}/><span>MODEL CONFIDENCE REDUCED</span></div>}
   </div>;
 }
@@ -240,29 +254,73 @@ function DataHealth({ sources, now }: { sources: LatestNowcastResponse["data_sta
   return <div className={`data-health ${open ? "open" : ""}`}>
     <div className="data-trigger" role="button" tabIndex={0} onClick={()=>setOpen(!open)}><span>DATA</span><div>{(sources ?? []).map((source)=><i key={source.source} className={source.state === "complete" ? "live" : source.state === "synthetic" ? "synthetic" : "degraded"}></i>)}</div><Icon name="chevron" size={13}/></div>
     {open && <div className="data-panel"><div className="data-title"><span>INPUT SOURCE HEALTH</span><b>{istTime(now)}</b></div>
-      {(sources ?? []).map((source)=><div className="source-line" key={source.source}><i className={source.state === "complete" ? "live" : source.state === "synthetic" ? "synthetic" : "degraded"}></i><span>{source.source}</span><b className={source.state}>{source.state.toUpperCase()}</b><em>{source.observed_at ? istTime(new Date(source.observed_at)) : "NO DATA"}</em></div>)}
+      {(sources ?? []).map((source)=><div className="source-line" key={source.source}><i className={source.state === "complete" ? "live" : source.state === "synthetic" ? "synthetic" : "degraded"}></i><span>{source.source}<small>{provenanceFor([source],/lightning/i.test(source.source)?"lightning":"forecast")}</small></span><b className={source.state}>{source.state.toUpperCase()}</b><em>{source.observed_at ? istTime(new Date(source.observed_at)) : "NO DATA"}</em></div>)}
       {!sources && <div className="data-foot">NO SOURCE HEALTH DATA</div>}
     </div>}
   </div>;
 }
 
-function IntelligencePanel({ storm, close, degraded, openImpact }: { storm: Storm; close: () => void; degraded: boolean; openImpact: () => void }) {
-  const confidence = degraded ? storm.confidence - 7 : storm.confidence;
+function LightningCorroborationPanel({ storm }: { storm: Storm }) {
+  const [result, setResult] = useState<LightningCorroboration | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "unavailable">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const lookup = async () => {
+    setState("loading"); setMessage(null); setResult(null);
+    try { setResult(await fetchLightningCorroboration(storm.latitude, storm.longitude)); setState("idle"); }
+    catch (error) {
+      setState("unavailable");
+      setMessage(error instanceof LightningLookupError ? error.message : "Live third-party corroboration is unavailable.");
+    }
+  };
+  return <section className="lightning-corroboration" aria-label="Live third-party lightning corroboration">
+    <span>LIVE THIRD-PARTY CORROBORATION</span><em>NOT A MODEL INPUT</em>
+    <p>Weatherbit · 75 km · last 15 min</p>
+    {state === "idle" && !result && <Action onClick={lookup}>CHECK LIVE LIGHTNING <Icon name="target"/></Action>}
+    {state === "loading" && <p className="corroboration-status">QUERYING LIVE PROVIDER…</p>}
+    {state === "unavailable" && <div className="corroboration-status unavailable">{message}<Action onClick={lookup}>TRY AGAIN</Action></div>}
+    {result && <div className="corroboration-result"><strong>{result.event_count}</strong><span>EVENTS NEAR TRACKED CELL</span><small>{result.observations[0]?.timestamp_utc ? `Latest: ${result.observations[0].timestamp_utc} UTC` : "No returned strikes in this lookup"}</small><Action onClick={lookup}>REFRESH</Action></div>}
+  </section>;
+}
+
+function IntelligencePanel({ storm, close, degraded, openImpact, openAnalysis, sources, horizon }: { storm: Storm; close: () => void; degraded: boolean; openImpact: () => void; openAnalysis: () => void; sources: LatestNowcastResponse["data_status"]["sources"]; horizon: number }) {
+  const lead=leadAt(storm,horizon); const probability=lead?.probability ?? storm.probability; const lightning=lead?.lightning; const confidence = lead?.confidence === null || lead?.confidence === undefined ? null : degraded ? lead.confidence - 7 : lead.confidence;
+  const forecastSource=provenanceFor(sources,"forecast"); const lightningSource=provenanceFor(sources,"lightning");
   return <div className="intelligence-panel">
     <div className="panel-axis"></div>
     <div className="intelligence-head"><div><span>STORM INTELLIGENCE</span><strong>{storm.id}</strong></div><Action onClick={close}><Icon name="close"/></Action></div>
-    <div className="risk-line"><Mark tone={storm.risk.toLowerCase()}>{storm.risk} RISK</Mark><span>TREND DATA NOT AVAILABLE</span></div>
-    <div className="hero-probability"><strong>{storm.probability}<sup>%</sup></strong><span>STORM<br/>PROBABILITY</span></div>
+    <div className="risk-line"><Mark tone={storm.risk.toLowerCase()}>{storm.risk} RISK</Mark><span>{storm.trend === "TREND UNAVAILABLE" ? "TREND UNAVAILABLE" : `TREND: ${storm.trend.toUpperCase()}`}</span></div>
+    <div className="hero-probability"><strong>{probability}<sup>%</sup></strong><span>STORM PROBABILITY · +{lead?.minutes ?? "?"} MIN<br/><small>{forecastSource}</small></span></div>
     <div className="instrument-grid">
-      <div><span>CONFIDENCE</span><strong className={degraded?"reduced":""}>{confidence}%</strong><i><b style={{width:`${confidence}%`}}></b></i></div>
-      <div><span>LIGHTNING</span><strong>{storm.lightning}%</strong></div>
-      <div><span>VELOCITY</span><strong>{storm.speed}<small> KM/H</small></strong></div>
+      <div><span>CONFIDENCE</span><strong className={degraded?"reduced":""}>{confidence ?? "NO LEAD DATA"}{confidence !== null && "%"}</strong>{confidence !== null && <i><b style={{width:`${confidence}%`}}></b></i>}</div>
+      <div><span>LIGHTNING</span><strong>{lightning ?? "NO LEAD DATA"}{lightning !== null && "%"}</strong><small>{lightningSource}</small></div>
+      <div><span>VELOCITY</span><strong>{storm.speed}<small> KM/H · ILLUSTRATIVE</small></strong></div>
       <div><span>EST. ARRIVAL</span><strong>{storm.eta ?? "—"}{storm.eta !== null && <small> MIN</small>}</strong></div>
     </div>
     <div className="affected-area"><span>PROJECTED IMPACT CORRIDOR</span><strong>{storm.place}</strong></div>
+    <LightningCorroborationPanel key={storm.id} storm={storm}/>
     {degraded && <div className="degraded-note"><Icon name="info" size={15}/><span>Confidence reduced due to delayed ground-station observations.</span></div>}
-    <div className="panel-actions"><Action onClick={openImpact}>WHY THIS PREDICTION? <Icon name="arrow"/></Action><Action primary>OPEN STORM ANALYSIS <Icon name="arrow"/></Action></div>
+    <div className="panel-actions"><Action onClick={openImpact}>WHY THIS PREDICTION? <Icon name="arrow"/></Action><Action primary onClick={openAnalysis}>OPEN STORM ANALYSIS <Icon name="arrow"/></Action></div>
   </div>;
+}
+
+function StormAnalysis({ storm, close, sources }: { storm: Storm; close: () => void; sources: LatestNowcastResponse["data_status"]["sources"] }) {
+  const horizon = storm.leads.map((lead)=>lead.minutes);
+  const series=[["probability","#7c5cff"],["lightning","#ffc857"],["confidence","#28d7e8"]] as const;
+  return <div className="mode-overlay analysis-overlay" role="dialog" aria-modal="true" aria-label={`${storm.id} storm analysis`} onKeyDown={(e)=>e.key==="Escape"&&close()}><div className="analysis-card"><div className="overlay-head"><div><span>FORECAST EXPLANATION</span><strong>{storm.id} STORM ANALYSIS</strong><p>Projected corridor: {storm.place}</p><p>{provenanceFor(sources,"forecast")}</p><p>LIGHTNING: {provenanceFor(sources,"lightning")}</p></div><Action ariaLabel="Close storm analysis" onClick={close}><Icon name="close"/></Action></div><div className="analysis-chart" aria-label="Probability, lightning, and confidence forecast from API lead-time model output"><svg viewBox="0 0 420 170" role="img"><path d="M20 138 H400 M20 96 H400 M20 54 H400" className="chart-grid"/>{series.map(([metric,color])=>{const points=storm.leads.map((lead,index)=>({x:20+index*(380/Math.max(1,storm.leads.length-1)),value:lead[metric]})).filter((point)=>point.value !== null);return points.length>1?<path key={metric} d={points.map((point,index)=>`${index?"L":"M"}${point.x} ${145-Number(point.value)*1.1}`).join(" ")} fill="none" stroke={color} strokeWidth="3"/>:null})}{horizon.map((minute,index)=><text key={minute} x={16+index*(380/Math.max(1,horizon.length-1))} y="163">+{minute}</text>)}</svg><div><span>PROBABILITY</span><span>LIGHTNING</span><span>CONFIDENCE</span></div><p>{storm.leads.length < 6 ? "ILLUSTRATIVE: incomplete lead series returned by source." : "Lead-specific values from API prediction cubes."}</p></div><div className="analysis-source"><span>SOURCE ATTRIBUTION</span>{Object.entries(storm.attribution).map(([name,value])=><p key={name}>{name}<b>{percent(value)}%</b></p>)}</div></div></div>;
+}
+
+function ModePanel({ mode, storms, select, sources }: { mode: Mode; storms: Storm[]; select: (storm: Storm) => void; sources: LatestNowcastResponse["data_status"]["sources"] }) {
+  if (!["Storms","Nowcast","Risk","Data","Infrastructure"].includes(mode)) return null;
+  const ordered = [...storms].sort((a,b)=>b.probability-a.probability);
+  const heading = mode === "Storms" ? "ACTIVE STORM OBJECTS" : mode === "Nowcast" ? "FORECAST EVOLUTION" : mode === "Risk" ? "EXPOSURE RANKING" : mode === "Data" ? "DATA HEALTH DETAIL" : "CRITICAL INFRASTRUCTURE";
+  return <section className="mode-panel" aria-label={heading}><span>{mode.toUpperCase()}</span><strong>{heading}</strong>{mode === "Nowcast" && <p>Tracks enabled · probability changes are shown by the ordered forecast horizon.</p>}{mode === "Data" ? <p>Per-source latency and ingest status are available in the DATA control at upper right.</p> : <div className="mode-rows">{ordered.map((storm,index)=><button key={storm.id} type="button" onClick={()=>select(storm)}><b>{index+1}</b><strong>{storm.id}</strong><span>{storm.place}</span><em>{storm.risk} · {storm.probability}% · {storm.eta ?? "—"} MIN · {provenanceFor(sources,"forecast")}</em></button>)}</div>}</section>;
+}
+
+function SearchPalette({ storms, close, select }: { storms: Storm[]; close: () => void; select: (storm: Storm) => void }) {
+  const [query,setQuery]=useState(""); const input=useRef<HTMLInputElement>(null);
+  useEffect(()=>{input.current?.focus();},[]);
+  const results=storms.filter((storm)=>`${storm.id} ${storm.place}`.toLowerCase().includes(query.toLowerCase()));
+  return <div className="mode-overlay search-overlay" role="dialog" aria-modal="true" aria-label="Search command palette" onKeyDown={(e)=>e.key==="Escape"&&close()}><div className="search-card"><input ref={input} value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search storms, districts, warning IDs…" aria-label="Search storms, districts, and warning IDs"/>{results.map((storm)=><button type="button" key={storm.id} onClick={()=>{select(storm);close();}}><strong>{storm.id}</strong><span>{storm.place}</span><em>{storm.risk} · {storm.probability}%</em></button>)}{!results.length&&<p>No matching live storm objects.</p>}</div></div>;
 }
 
 function ImpactHud({ expanded, setExpanded, selected }: { expanded: boolean; setExpanded: (x: boolean) => void; selected: Storm | null }) {
@@ -288,7 +346,7 @@ function ImpactHud({ expanded, setExpanded, selected }: { expanded: boolean; set
   </div>;
 }
 
-function ForecastTimeline({ horizon, setHorizon, playing, setPlaying, selected, cycleTime }: { horizon: number; setHorizon: (n: number) => void; playing: boolean; setPlaying: (p: boolean) => void; selected: Storm | null; cycleTime: Date }) {
+function ForecastTimeline({ horizon, setHorizon, playing, setPlaying, selected, cycleTime, sources }: { horizon: number; setHorizon: (n: number) => void; playing: boolean; setPlaying: (p: boolean) => void; selected: Storm | null; cycleTime: Date; sources: LatestNowcastResponse["data_status"]["sources"] }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const validTime = istTime(new Date(cycleTime.getTime() + horizon * 60_000));
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -299,8 +357,8 @@ function ForecastTimeline({ horizon, setHorizon, playing, setPlaying, selected, 
   return <div className={`forecast-timeline ${selected ? "active" : ""}`}>
     <Action className="play-control" onClick={()=>setPlaying(!playing)}><Icon name={playing?"pause":"play"}/><span>{playing?"PAUSE":"PLAY FORECAST"}</span></Action>
     <div className="timeline-main">
-      <div className="timeline-meta"><span>PREDICTION HORIZON</span><strong>{horizon === 0 ? "NOW" : `+${horizon} MIN`}</strong><em>{selected ? `${selected.id} · ASTRA AI` : "SELECT A STORM TO INSPECT"}</em></div>
-      <div className="timeline-track" ref={trackRef} onPointerDown={scrub}>
+      <div className="timeline-meta"><span>PREDICTION HORIZON</span><strong>{horizon === 0 ? "NOW" : `+${horizon} MIN`}</strong><em>{selected ? `${selected.id} · ${provenanceFor(sources,"forecast")}` : "SELECT A STORM TO INSPECT"}</em></div>
+      <div className="timeline-track" ref={trackRef} onPointerDown={(event)=>{event.currentTarget.setPointerCapture(event.pointerId);scrub(event);}} onPointerMove={(event)=>{if(event.currentTarget.hasPointerCapture(event.pointerId)) scrub(event);}} onPointerUp={(event)=>event.currentTarget.releasePointerCapture(event.pointerId)}>
         <div className="timeline-fill" style={{width:`${horizon / 60 * 100}%`}}></div>
         {[0,10,20,30,40,50,60].map((n)=><div key={n} className={`tick ${horizon >= n ? "passed":""} ${horizon === n ? "current":""}`} style={{left:`${n/60*100}%`}} role="button" tabIndex={0} onClick={()=>setHorizon(n)}><i></i><span>{n===0?"NOW":n}</span></div>)}
         <div className="playhead" style={{left:`${horizon / 60 * 100}%`}}><i></i></div>
@@ -342,25 +400,30 @@ function LegacyMockAuditOverlay({ close }: { close: () => void }) {
   return <div className="mode-overlay audit-overlay"><div className="overlay-head"><div><span>IMMUTABLE DECISION RECORD</span><strong>AUDIT CHRONOLOGY</strong><p>27 September 2026 · All times IST</p></div><div role="button" tabIndex={0} onClick={close}><Icon name="close"/></div></div><div className="audit-stream">{rows.map((r,i)=><div className="audit-event" key={r[0]}><span className="audit-time">{r[0]}</span><i className={r[3].toLowerCase()}></i><div><strong>{r[3]}</strong><span>{r[1]} · {r[4]}</span></div><div><span>ACTOR</span><strong>{r[2]}</strong></div><Icon name="chevron"/></div>)}</div></div>;
 }
 
-function LiveWarningCenter({ close }: { close: () => void }) {
+function LiveWarningCenter({ close, storms, select, onCount, sources }: { close: () => void; storms: Storm[]; select: (storm: Storm) => void; onCount: (count: number) => void; sources: LatestNowcastResponse["data_status"]["sources"] }) {
   const [drafts, setDrafts] = useState<WarningDraft[] | null>(null);
-  const [actor, setActor] = useState("");
+  const [actor, setActor] = useState("R. Kumar");
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<WarningDraft | null>(null);
+  const [activeDraft, setActiveDraft] = useState<WarningDraft | null>(null);
+  const [areas,setAreas]=useState(""); const [message,setMessage]=useState(""); const [confirm,setConfirm]=useState<"approve"|"dismiss"|null>(null);
   useEffect(() => { fetchWarningDrafts().then(setDrafts).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load warning drafts.")); }, []);
+  useEffect(()=>onCount(drafts?.length ?? 0),[drafts,onCount]);
+  const review=(draft: WarningDraft)=>{ setActiveDraft(draft); setAreas(String(draft.payload.affected_areas ?? "")); setMessage(String(draft.payload.message ?? `Thunderstorm activity is expected to affect ${String(draft.payload.affected_areas ?? "the listed areas")}. Monitor official IMD guidance.`)); const match=storms.find((storm)=>draft.warning_id.includes(storm.id) || draft.payload.storm_id===storm.id); if(match) select(match); };
   const decide = async (draft: WarningDraft, decision: "approve" | "edit" | "dismiss") => {
     if (!actor.trim()) { setError("Enter your forecaster identity before recording a decision."); return; }
     setError(null);
-    try { const saved = await decideWarning(draft.warning_id, actor.trim(), decision); setResult(saved); setDrafts((current) => current?.filter((item) => item.warning_id !== draft.warning_id) ?? []); }
+    try { await decideWarning(draft.warning_id, actor.trim(), decision, decision === "edit" ? { affected_areas: areas, message } : undefined); setDrafts((current) => decision === "edit" ? current?.map((item)=>item.warning_id===draft.warning_id ? {...item,payload:{...item.payload,affected_areas:areas,message}} : item) ?? [] : current?.filter((item) => item.warning_id !== draft.warning_id) ?? []); if(decision !== "edit") setActiveDraft(null); setConfirm(null); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Warning decision was not recorded."); }
   };
-  return <div className="warning-overlay warning-list-overlay"><div className="overlay-head"><div><span>HUMAN-IN-THE-LOOP OPERATIONS</span><strong>WARNING CENTER</strong><p>{drafts === null ? "Loading drafts" : `${drafts.length} drafts require forecaster review`}</p></div><div role="button" tabIndex={0} onClick={close}><Icon name="close"/></div></div><div className="editor-field"><span>FORECASTER ID</span><input value={actor} onChange={(event)=>setActor(event.target.value)} placeholder="Required to record a decision" /></div>{error && <div className="degraded-note">{error}</div>}{result && <div className="warning-policy"><Icon name="check"/><span>Decision recorded: {result.warning_id} is {result.status}. No warning was transmitted.</span></div>}{drafts?.length === 0 && <div className="warning-policy"><span>NO WARNING DRAFTS AVAILABLE</span></div>}<div className="warning-timeline">{drafts?.map((draft)=><div className="warning-draft" key={draft.warning_id}><div className="time-node"><span></span><b>{istTime(new Date(draft.created_at))}</b></div><div className="draft-main"><div><strong>{draft.warning_id}</strong><Mark tone="gold">{String(draft.payload.tier ?? "NO DATA").toUpperCase()}</Mark></div><span>{String(draft.payload.affected_areas ?? "NO DATA")}</span></div><div className="draft-stat"><span>STATUS</span><strong>{draft.status.toUpperCase()}</strong></div><div className="draft-stat"><span>IMPACT</span><strong>{String(draft.payload.impact_index ?? "NO DATA")}</strong></div><div className="draft-stat"><span>ETA</span><strong>{String(draft.payload.eta ?? "NO DATA")}</strong></div><div><Action danger onClick={()=>decide(draft,"dismiss")}>DISMISS</Action><Action onClick={()=>decide(draft,"edit")}><Icon name="edit"/> EDIT</Action><Action primary onClick={()=>decide(draft,"approve")}>APPROVE <Icon name="check"/></Action></div></div>)}</div></div>;
+  if(activeDraft) return <div className="warning-workspace"><div className="warning-map-pane"><div className="warning-map-label"><span>STORM CONTEXT</span><strong>{activeDraft.warning_id}</strong></div><AtmosphericMap storms={storms} selected={storms.find((s)=>activeDraft.warning_id.includes(s.id)) ?? null} setSelected={select} horizon={30} layers={new Set(["Probability","Lightning","Tracks","Infrastructure"])} mode="Warnings" sources={sources}/></div><div className="warning-editor"><div className="editor-head"><div><Mark tone="gold">PENDING APPROVAL</Mark><strong>WARNING DRAFT</strong><span>{activeDraft.warning_id} · Created {istTime(new Date(activeDraft.created_at))}</span></div><Action ariaLabel="Back to warnings" onClick={()=>setActiveDraft(null)}><Icon name="close"/></Action></div><div className="editor-field"><span>FORECASTER ID</span><input value={actor} onChange={(event)=>setActor(event.target.value)} /></div><div className="warning-instruments">{[["SEVERITY",String(activeDraft.payload.tier ?? "HIGH")],["ETA",String(activeDraft.payload.eta ?? "—")],["IMPACT",String(activeDraft.payload.impact_index ?? "—")],["DRAFT",activeDraft.warning_id]].map(([a,b])=><div key={a}><span>{a}</span><strong>{b}</strong></div>)}</div><label className="editor-field"><span>AFFECTED AREAS</span><input value={areas} onChange={(e)=>setAreas(e.target.value)} /></label><label className="editor-field message"><span>WARNING MESSAGE</span><textarea value={message} onChange={(e)=>setMessage(e.target.value)} maxLength={500}/><em>{message.length} / 500 · Changes are recorded in the audit trail</em></label>{error&&<div className="degraded-note">{error}</div>}<div className="editor-actions"><Action danger onClick={()=>setConfirm("dismiss")}>DISMISS</Action><Action onClick={()=>decide(activeDraft,"edit")}><Icon name="edit"/> SAVE EDIT</Action><Action primary onClick={()=>setConfirm("approve")}>APPROVE <Icon name="check"/></Action></div>{confirm&&<div className="confirm-dialog" role="dialog" aria-modal="true"><div className="confirm-title">{confirm === "approve" ? "Approve" : "Dismiss"} warning?</div><p>This will be recorded in the audit trail for {activeDraft.warning_id}.</p><div><Action onClick={()=>setConfirm(null)}>CANCEL</Action><Action danger={confirm==="dismiss"} primary={confirm==="approve"} onClick={()=>decide(activeDraft,confirm)}>CONFIRM</Action></div></div>}</div></div>;
+  return <div className="warning-overlay warning-list-overlay"><div className="overlay-head"><div><span>HUMAN-IN-THE-LOOP OPERATIONS</span><strong>WARNING CENTER</strong><p>{drafts === null ? "Loading drafts" : `${drafts.length} drafts require forecaster review`}</p></div><Action ariaLabel="Close warning center" onClick={close}><Icon name="close"/></Action></div>{error && <div className="degraded-note">{error}</div>}{drafts?.length === 0 && <div className="warning-policy"><span>NO WARNING DRAFTS AVAILABLE</span></div>}<div className="warning-timeline">{drafts?.map((draft)=><div className="warning-draft" key={draft.warning_id}><div className="time-node"><span></span><b>{istTime(new Date(draft.created_at))}</b></div><div className="draft-main"><div><strong>{draft.warning_id}</strong><Mark tone="gold">{String(draft.payload.tier ?? "NO DATA").toUpperCase()}</Mark></div><span>{String(draft.payload.affected_areas ?? "NO DATA")}</span></div><div className="draft-stat"><span>STATUS</span><strong>{draft.status.toUpperCase()}</strong></div><div className="draft-stat"><span>IMPACT</span><strong>{String(draft.payload.impact_index ?? "NO DATA")}</strong></div><div className="draft-stat"><span>ETA</span><strong>{String(draft.payload.eta ?? "NO DATA")}</strong></div><Action primary onClick={()=>review(draft)}>REVIEW <Icon name="arrow"/></Action></div>)}</div></div>;
 }
 
 function LiveAuditOverlay({ close }: { close: () => void }) {
   const [rows, setRows] = useState<AuditEvent[] | null>(null); const [error, setError] = useState<string | null>(null);
+  const [expanded,setExpanded]=useState<string | null>(null);
   useEffect(() => { fetchWarningAudit().then(setRows).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load audit records.")); }, []);
-  return <div className="mode-overlay audit-overlay"><div className="overlay-head"><div><span>IMMUTABLE DECISION RECORD</span><strong>AUDIT CHRONOLOGY</strong><p>All times IST</p></div><div role="button" tabIndex={0} onClick={close}><Icon name="close"/></div></div>{error && <div className="degraded-note">{error}</div>}<div className="audit-stream">{rows?.length === 0 && <div className="warning-policy">NO AUDIT RECORDS AVAILABLE</div>}{rows?.map((row)=><div className="audit-event" key={`${row.warning_id}-${row.occurred_at}`}><span className="audit-time">{istTime(new Date(row.occurred_at), true)}</span><i className={row.decision === "approve" ? "approved" : row.decision === "dismiss" ? "dismissed" : ""}></i><div><strong>{row.decision.toUpperCase()}</strong><span>{row.warning_id}</span></div><div><span>ACTOR</span><strong>{row.actor_id}</strong></div><Icon name="chevron"/></div>)}</div></div>;
+  return <div className="mode-overlay audit-overlay"><div className="overlay-head"><div><span>IMMUTABLE DECISION RECORD</span><strong>AUDIT CHRONOLOGY</strong><p>All times IST</p></div><Action ariaLabel="Close audit chronology" onClick={close}><Icon name="close"/></Action></div>{error && <div className="degraded-note">{error}</div>}<div className="audit-stream">{rows?.length === 0 && <div className="warning-policy">NO AUDIT RECORDS AVAILABLE</div>}{rows?.map((row)=><button type="button" className={`audit-event ${expanded===row.occurred_at?"expanded":""}`} key={`${row.warning_id}-${row.occurred_at}`} onClick={()=>setExpanded(expanded===row.occurred_at?null:row.occurred_at)}><span className="audit-time">{istTime(new Date(row.occurred_at), true)}</span><i className={row.decision === "approve" ? "approved" : row.decision === "dismiss" ? "dismissed" : ""}></i><div><strong>{row.decision.toUpperCase()}</strong><span>{row.warning_id}</span></div><div><span>ACTOR</span><strong>{row.actor_id}</strong></div><Icon name="chevron"/>{expanded===row.occurred_at&&<p className="audit-detail">{row.edit ? JSON.stringify(row.edit) : "Decision recorded without edited fields."}</p>}</button>)}</div></div>;
 }
 
 function LandingAtmosphere() {
@@ -458,6 +521,9 @@ export default function App() {
   const [loadState,setLoadState]=useState<LoadState>("loading");
   const [loadError,setLoadError]=useState<string|null>(null);
   const [reloadKey,setReloadKey]=useState(0);
+  const [searchOpen,setSearchOpen]=useState(false);
+  const [analysisOpen,setAnalysisOpen]=useState(false);
+  const [warningCount,setWarningCount]=useState(0);
 
   useEffect(()=>{
     const controller = new AbortController();
@@ -477,6 +543,8 @@ export default function App() {
     return ()=>controller.abort();
   },[reloadKey]);
 
+  useEffect(()=>{ fetchWarningDrafts().then((items)=>setWarningCount(items.length)).catch(()=>setWarningCount(0)); },[]);
+
   useEffect(()=>{
     if (!playing) return;
     const timer = window.setInterval(()=>setHorizon((h)=>{
@@ -491,6 +559,7 @@ export default function App() {
     if (next==="Warnings") setWarningState("list");
     if (next==="Infrastructure") setLayers((old)=>new Set([...old,"Infrastructure"]));
     if (next==="Risk") setLayers((old)=>new Set([...old,"Risk fields"]));
+    if (next==="Nowcast") setLayers((old)=>new Set([...old,"Tracks"]));
   };
   const toggleLayer=(layer:Layer)=>setLayers((old)=>{const next=new Set(old);next.has(layer)?next.delete(layer):next.add(layer);return next});
   const storms=nowcast ? toMapStorms(nowcast) : [];
@@ -498,21 +567,24 @@ export default function App() {
   const returnToMap=()=>{setMode("Overview");setWarningState("list");setSelected(storms[0] ?? null);setHorizon(30)};
 
   if (!entered) return <Landing enter={()=>setEntered(true)}/>;
-  return <div className="astra-app command-enter">
-    <AtmosphericMap storms={storms} selected={selected} setSelected={(s)=>{setSelected(s);setHorizon(0)}} horizon={horizon} layers={layers} mode={mode}/>
+  return <div className="astra-app command-enter"><a className="skip-link" href="#main-content">Skip to command center</a>
+    <AtmosphericMap storms={storms} selected={selected} setSelected={(s)=>{setSelected(s);setHorizon(0)}} horizon={horizon} layers={layers} mode={mode} sources={nowcast?.data_status.sources ?? []}/>
     <div className="vignette"></div>
-    <NavRail mode={mode} setMode={chooseMode}/>
-    <TopHud setMode={chooseMode} now={now} dataStatus={nowcast?.data_status.overall ?? null}/>
+    <NavRail mode={mode} setMode={chooseMode} warningCount={warningCount}/>
+    <TopHud setMode={chooseMode} now={now} dataStatus={nowcast?.data_status.overall ?? null} openSearch={()=>setSearchOpen(true)} warningCount={warningCount}/>
     <Telemetry degraded={apiDegraded} storms={storms}/>
     <div className="mode-label"><span>MODE</span><strong>{mode.toUpperCase()}</strong>{mode!=="Overview"&&<em>{mode==="Nowcast"?"FORECAST EVOLUTION":mode==="Risk"?"EXPOSURE ANALYSIS":mode==="Infrastructure"?"CRITICAL ASSETS":"INTELLIGENCE VIEW"}</em>}</div>
     <LayerControl layers={layers} toggle={toggleLayer}/>
     <DataHealth sources={nowcast?.data_status.sources ?? null} now={now}/>
-    {selected && <IntelligencePanel storm={selected} close={()=>{setSelected(null);setImpactExpanded(false)}} degraded={apiDegraded} openImpact={()=>setImpactExpanded(true)}/>}
+    <main id="main-content">{selected && <IntelligencePanel storm={selected} close={()=>{setSelected(null);setImpactExpanded(false)}} degraded={apiDegraded} openImpact={()=>setImpactExpanded(true)} openAnalysis={()=>setAnalysisOpen(true)} sources={nowcast?.data_status.sources ?? []} horizon={horizon}/>}</main>
     <ImpactHud expanded={impactExpanded} setExpanded={setImpactExpanded} selected={selected}/>
     {mode==="Overview" && !selected && <div className="discovery-prompt"><Icon name={loadState==="error" ? "info" : "target"}/><div><strong>{loadState==="loading" ? "LOADING ATMOSPHERIC CYCLE" : loadState==="error" ? "LIVE CYCLE UNAVAILABLE" : loadState==="empty" ? "NO ACTIVE STORM OBJECTS" : "SELECT AN ATMOSPHERIC SYSTEM"}</strong><span>{loadState==="loading" ? "Retrieving the latest pan-India nowcast" : loadState==="error" ? loadError : loadState==="empty" ? "The latest pan-India cycle contains no tracked storms" : "Inspect movement, forecast evolution and projected impact"}</span>{loadState==="error" && <Action onClick={()=>setReloadKey((key)=>key+1)}>RETRY <Icon name="arrow"/></Action>}</div></div>}
-    {(mode==="Warnings") && <LiveWarningCenter close={returnToMap}/>} 
+    {(mode==="Warnings") && <LiveWarningCenter close={returnToMap} storms={storms} select={setSelected} onCount={setWarningCount} sources={nowcast?.data_status.sources ?? []}/>} 
     {mode==="Audit" && <LiveAuditOverlay close={()=>setMode("Overview")}/>}
-    {mode!=="Warnings" && mode!=="Audit" && <ForecastTimeline horizon={horizon} setHorizon={setHorizon} playing={playing} setPlaying={setPlaying} selected={selected} cycleTime={nowcast ? new Date(nowcast.generated_at) : now}/>}
-    {mode==="Overview" && <div className="warning-beacon" role="button" tabIndex={0} onClick={()=>chooseMode("Warnings")}><Icon name="warning"/><div><strong>WARNINGS</strong><span>VIEW LIVE DRAFTS</span></div><Icon name="chevron" size={14}/></div>}
+    <ModePanel mode={mode} storms={storms} select={(storm)=>{setSelected(storm);setHorizon(0)}} sources={nowcast?.data_status.sources ?? []}/>
+    {searchOpen&&<SearchPalette storms={storms} close={()=>setSearchOpen(false)} select={(storm)=>{setSelected(storm);setHorizon(0)}}/>}
+    {analysisOpen&&selected&&<StormAnalysis storm={selected} close={()=>setAnalysisOpen(false)} sources={nowcast?.data_status.sources ?? []}/>} 
+    {mode!=="Warnings" && mode!=="Audit" && <ForecastTimeline horizon={horizon} setHorizon={setHorizon} playing={playing} setPlaying={setPlaying} selected={selected} cycleTime={nowcast ? new Date(nowcast.generated_at) : now} sources={nowcast?.data_status.sources ?? []}/>} 
+    {mode==="Overview" && <button type="button" className={`warning-beacon ${warningCount === 0 ? "neutral" : ""}`} onClick={()=>chooseMode("Warnings")}><Icon name="warning"/><div><strong>WARNINGS · {warningCount}</strong><span>{warningCount === 0 ? "NO PENDING DRAFTS" : "VIEW LIVE DRAFTS"}</span></div><Icon name="chevron" size={14}/></button>}
   </div>;
 }

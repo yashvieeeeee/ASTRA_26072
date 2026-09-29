@@ -8,7 +8,8 @@ def test_sample_pipeline_runs_without_credentials_and_marks_caveats():
     fused = PreprocessingPipeline().run("sample")
     assert fused.atmospheric_state.sizes["feature"] >= 17
     assert fused.attrs["source_status"]["synthetic_lightning"]["synthetic"] is True
-    assert fused.attrs["source_status"]["ground_stations_pending"]["pending"] is True
+    assert fused.attrs["source_status"]["ground_stations"]["provider"] == "meteostat"
+    assert fused.attrs["source_status"]["ground_stations"]["coverage_state"] == "degraded"
     assert all(status["mode"] == "sample" and status["is_synthetic"] is True for status in fused.attrs["source_status"].values())
 
 def test_lightning_sample_does_not_claim_uncomputed_cape_precipitation_formula():

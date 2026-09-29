@@ -1,0 +1,40 @@
+Traceback (most recent call last):
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\response.py", line 754, in _error_catcher
+    yield
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\response.py", line 900, in _raw_read
+    raise IncompleteRead(self._fp_bytes_read, self.length_remaining)
+urllib3.exceptions.IncompleteRead: IncompleteRead(26366214 bytes read, 2422286 more expected)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\models.py", line 820, in generate
+    yield from self.raw.stream(chunk_size, decode_content=True)
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\response.py", line 1066, in stream
+    data = self.read(amt=amt, decode_content=decode_content)
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\response.py", line 983, in read
+    data = self._raw_read(amt)
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\response.py", line 878, in _raw_read
+    with self._error_catcher():
+         ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\response.py", line 778, in _error_catcher
+    raise ProtocolError(arg, e) from e
+urllib3.exceptions.ProtocolError: ('Connection broken: IncompleteRead(26366214 bytes read, 2422286 more expected)', IncompleteRead(26366214 bytes read, 2422286 more expected))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Yashvie Mahey\OneDrive\Desktop\ASTRA_26072\scripts\ingest_mosdac.py", line 44, in <module>
+    ingest(scenes, downloader, stager)
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Yashvie Mahey\OneDrive\Desktop\ASTRA_26072\scripts\ingest_mosdac.py", line 15, in ingest
+    downloaded = downloader.download(scene)
+  File "C:\Users\Yashvie Mahey\OneDrive\Desktop\ASTRA_26072\astra_pipeline\mosdac.py", line 176, in download
+    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                 ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Yashvie Mahey\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\models.py", line 822, in generate
+    raise ChunkedEncodingError(e)
+requests.exceptions.ChunkedEncodingError: ('Connection broken: IncompleteRead(26366214 bytes read, 2422286 more expected)', IncompleteRead(26366214 bytes read, 2422286 more expected))

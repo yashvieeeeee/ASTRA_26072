@@ -1,0 +1,5 @@
+usage: ingest_mosdac.py [-h] --start START --end END [--directory DIRECTORY]
+                        [--config CONFIG] [--mode {historical,realtime}]
+                        [--dataset-id {3RIMG_L1C_ASIA_MER}] [--count COUNT]
+                        [--bounding-box BOUNDING_BOX]
+ingest_mosdac.py: error: unrecognized arguments: Mahey\.astra\satellite.json

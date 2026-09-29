@@ -10,7 +10,7 @@ python scripts/run_sample.py
 python -m pytest
 ```
 
-The `sample` adapters generate a small deterministic five-timestep data cube. It exercises GPM-like rain, the three INSAT channels, a CAPE × rainfall lightning proxy, a pending station feed, and ERA5/GFS-like model fields. It deliberately covers the entire domain and emits JSON schemas in `schemas/`.
+The `sample` adapters generate a small deterministic five-timestep data cube. It exercises GPM-like rain, the three INSAT channels, a CAPE × rainfall lightning proxy, a CI-only Meteostat station fixture, and ERA5/GFS-like model fields. It deliberately covers the entire domain and emits JSON schemas in `schemas/`.
 
 ## Contracts and pipeline
 
@@ -23,13 +23,25 @@ Gridded production sources open Zarr with `chunks="auto"`; reductions remain xar
 | Adapter | Historical | Real-time | Setup |
 |---|---|---|---|
 | GPM IMERG | `GPM_3IMERGHH` Final | `GPM_3IMERGHHE` Early (~4 h) | NASA Earthdata `~/.netrc`; set `ASTRA_GPM_ZARR_URL` |
-| Satellite (fixed `insat_3d_3dr` contract) | EUMETSAT Meteosat-9 IODC archive (45.5°E; Meteosat-8 historical) | EUMETSAT IODC latest feed | `config.json` (or `ASTRA_SATELLITE_CONFIG`): `satellite_provider: eumetsat_iodc`, plus staged `historical_url`/`latest_url` or `zarr_url` |
-| Satellite alternate: INSAT-3D/3DR | MOSDAC archive | MOSDAC `latest=True` endpoint | Set the same `satellite_provider` flag to `mosdac`; existing `ASTRA_MOSDAC_CONFIG` and top-level MOSDAC endpoint keys remain supported |
+| Satellite (fixed `insat_3d_3dr` contract) | EUMETSAT Meteosat-9 IODC archive (45.5°E; Meteosat-8 historical) | EUMETSAT IODC latest feed | `config.json` (or `ASTRA_SATELLITE_CONFIG`): `satellite_provider: eumetsat`, plus staged `historical_url`/`latest_url` or `zarr_url` |
+| Satellite alternate: INSAT-3DR | MOSDAC L1C ASIA_MER archive | MOSDAC L1C ASIA_MER latest feed | Set `satellite_provider` to `mosdac`; credentials are read only from the external file named by `ASTRA_MOSDAC_CONFIG` |
 | Lightning | synthetic CAPE × rain proxy | synthetic CAPE × rain proxy | none; contract has `is_synthetic: true` |
-| Ground stations | mock schema | mock schema | **Pending real source selection**; contract has `pending_source: true` |
-| NWP | ERA5 / cdsapi target | GFS Herbie/Open-Meteo target | set `ASTRA_ERA5_ZARR_URL` or `ASTRA_GFS_ZARR_URL`; use a CDS-generated Zarr/NetCDF staging target for ERA5 |
+| Ground stations | Meteostat hourly station archive | Meteostat latest available hourly station data | `pip install meteostat`; station cache stays at Meteostat's default `~/.meteostat/cache` (outside this repository) |
+| NWP | ERA5 / cdsapi target | NOAA GFS 0.25° via Herbie | Install `herbie-data`; `gfs_herbie` is the default. Open-Meteo is restricted to small point fallback queries. |
 
-Use `PreprocessingPipeline().run("historical")` or `.run("realtime")` once endpoints are staged. EUMETSAT IODC is the default while MOSDAC approval is pending. To switch later, change one line in `config.json` from `"satellite_provider": "eumetsat_iodc"` to `"satellite_provider": "mosdac"`; no pipeline or model change is needed. The EUMETSAT adapter normalises SEVIRI `IR_108`, `IR_120`, and `WV_073` to the existing `ir1_brightness_temperature`, `tir1_brightness_temperature`, and `wv_brightness_temperature` Kelvin contract. Production endpoints must map their variable names/units to that fixed adapter contract; this is intentional so replacing a provider cannot change downstream behavior. The current NWP endpoint opener supports staged Zarr/NetCDF; a deployment may plug a `cdsapi`/Herbie fetcher into `NWPAdapter.production` without changing preprocessing.
+Use `PreprocessingPipeline().run("historical")` or `.run("realtime")` once endpoints are staged. Set `satellite_provider` to `eumetsat` or `mosdac`; an unconfigured choice fails before preprocessing. For MOSDAC, run `scripts/ingest_mosdac.py` manually on a tiny range: it searches/downloads `3RIMG_L1C_ASIA_MER`, sends the configured 68–98°E / 6–38°N bounding box and a three-scene cap, enforces a persistent 5,000 download-requests-per-day ceiling, and prints file size plus download/decode timings. The staged output maps MOSDAC TIR-1, TIR-2, and WV to `ir1_brightness_temperature`, `tir1_brightness_temperature`, and `wv_brightness_temperature` in Kelvin. The credentials file is never copied into shared configuration. The EUMETSAT adapter continues to normalise SEVIRI `IR_108`, `IR_120`, and `WV_073` to the same contract.
+
+### GFS/Herbie real-time NWP smoke test
+
+Real-time NWP uses Herbie to subset NOAA GFS `pgrb2.0p25` at the source, requesting `CAPE:surface` and `TMP`, `RH`, `UGRD`, and `VGRD` at 1000 and 500 mb. It stages the fixed 129 × 121 pan-India grid under the existing ERA5-shaped NWP contract, with real GFS temperature/RH/wind values and an explicit `NaN` CIN field because CIN is not part of the scoped GRIB selection. Herbie checks recent six-hourly cycles and falls back to a complete older cycle when the newest one is not published yet.
+
+CI mocks Herbie. To perform the intentional live pull, run:
+
+```powershell
+python scripts/smoke_gfs_herbie_india.py --live
+```
+
+Open-Meteo is no longer permitted as the full-grid provider; it is retained only for small point-query fallback work.
 
 ### Live EUMETSAT IODC satellite ingestion
 
@@ -52,7 +64,23 @@ It writes `historical.zarr` and a four-frame-or-more `latest.zarr`, then atomica
 
 Satpy is pinned at `0.58.0`. On Windows, install it in the project virtual environment first; native geospatial wheels (`pyresample`, `pyproj`, and raster dependencies) may require a current 64-bit Python and pip. If wheel installation fails, use a Conda environment with conda-forge geospatial packages, then install the pinned requirements there. CI never invokes Satpy or EUMETSAT: it uses synthetic reader fixtures.
 
-The ground-station and lightning fields must never be presented as observations: their pending/synthetic status is carried into fused output metadata. The test suite includes an explicit full-domain assertion and a failing narrow-adapter case so a regional feed cannot quietly reduce coverage.
+### Ground stations: Meteostat coverage and licence
+
+`GroundStationAdapter` uses `meteostat.Stations().nearby()` over a bounded 2° national anchor sample (including Mumbai, Delhi, Kolkata and Chennai), deduplicates the real stations found, and retrieves their records with `meteostat.Hourly`. It converts Meteostat's Celsius/hPa/km/h fields to the pipeline's K/Pa/m s-1 contract and nearest-neighbour assigns a station only within `ASTRA_METEOSTAT_MAX_DISTANCE_KM` (75 km by default). Cells beyond that radius, or cells/times with no observation, are **NaN** and have `station_available = 0`; they are reported as degraded rather than invented. Production output has `provider: "meteostat"` and `is_synthetic: false`.
+
+This is intentionally not an interpolation product. India may have insufficient Meteostat station density for a 0.25° grid; a production output is marked degraded whenever less than 80% of cells are supported, and its status records the coverage fraction and reason. A live 2026-09-29 probe using a coarse 4° discovery sample found 69 usable stations and only ~9.7% supported grid cells, so **Meteostat is currently too sparse to use as a standalone 0.25° pan-India source**. Do not treat it as nationally complete merely because its coordinates span the national grid. The sample adapter is a clearly marked synthetic CI fixture and is never used as a production fallback.
+
+Meteostat data is licensed under **CC BY-NC 4.0**: this integration is for non-commercial use only. Keep Meteostat's default local cache (`~/.meteostat/cache`) outside the repository; do not symlink or copy it into this project.
+
+Before a full-grid run, manually verify station coverage and hourly availability for the four major cities:
+
+```powershell
+python scripts/smoke_meteostat_india.py
+```
+
+For a historical period, set `ASTRA_METEOSTAT_START` and `ASTRA_METEOSTAT_END` to ISO-8601 UTC timestamps. Realtime uses the most recent five whole UTC hours. CI mocks the Meteostat client; it does not call the network.
+
+Lightning remains synthetic and is always labelled as such. The test suite includes an explicit full-domain assertion and a failing narrow-adapter case so a regional feed cannot quietly reduce coverage.
 
 ## Phase 2 nowcasting baselines
 
@@ -80,12 +108,16 @@ The training data must contain the requested Apr–Jun 2024 and Jul–Aug 2024 w
 
 ```powershell
 python scripts/fetch_infrastructure.py --spot-check-only
-python scripts/fetch_infrastructure.py --output data/critical_infrastructure.geojson
+python scripts/fetch_infrastructure.py --output data/critical_infrastructure.geojson --boundaries-output data/administrative_boundaries.geojson
 $env:DATABASE_URL='postgresql+psycopg://user:password@host/astra'
 python scripts/load_infrastructure_postgis.py data/critical_infrastructure.geojson
 ```
 
-The collector issues one Overpass query per hospital, school, airport, highway, railway, and emergency facility over the complete `(6,68,38,98)` domain. OSM coverage is not authoritative: feature tagging and density vary by state, linear highways/railways may exceed public Overpass resource limits, and real-world facilities can be missing. It fails rather than writes a partial national layer. Run the three-state mapping-density spot-check before use, retain the generated report with the layer, and validate against official state/IMD sources before operational use. PostGIS loading requires a user-supplied database; no database is configured in this workspace.
+The collector issues one Overpass query per hospital, school, airport, highway, railway, emergency facility, state boundary (administrative level 4), and district boundary (administrative level 6 or 8) over the complete `(6,68,38,98)` domain. It writes exposure features to `critical_infrastructure.geojson` and relation geometry to `administrative_boundaries.geojson`. OSM coverage is not authoritative: feature tagging and density vary by state, linear highways/railways may exceed public Overpass resource limits, and real-world facilities can be missing. It fails rather than writes a partial national layer. Run the three-state mapping-density spot-check before use, retain the generated report with the layer, and validate against official state/IMD sources before operational use. PostGIS loading requires a user-supplied database; no database is configured in this workspace.
+
+### OpenStreetMap attribution and ODbL
+
+The generated infrastructure and boundary layers contain OpenStreetMap data and are marked `© OpenStreetMap contributors`, licensed under the [Open Data Commons Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). Preserve that attribution and licence notice with any redistributed dataset, derivative database, or map/export that uses these layers. Any frontend credit for this data must visibly say **© OpenStreetMap contributors** and link to [openstreetmap.org/copyright](https://www.openstreetmap.org/copyright).
 
 Population density is supported as an explicit numeric path/cell input to the Impact Index, but no licensed pan-India population layer was supplied; it defaults to zero rather than being guessed. Similarly, the caller must provide authoritative administrative boundaries for affected-area lookup.
 

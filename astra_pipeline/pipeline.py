@@ -37,7 +37,7 @@ class PreprocessingPipeline:
     def _source_status(self, adapter, dataset):
         coverage = self._valid_fraction(dataset.to_array())
         below_threshold = any(value < self.min_valid_fraction for value in coverage)
-        existing = dataset.attrs.get("source_status", {}) if adapter.contract.name == "insat_3d_3dr" else {}
+        existing = dataset.attrs.get("source_status", {})
         return {"synthetic": adapter.metadata.is_synthetic, "is_synthetic": adapter.metadata.is_synthetic,
                 "mode": adapter.metadata.mode.value, "pending": adapter.contract.pending_source,
                 "valid_fraction_by_frame": coverage, "coverage_state": "degraded" if below_threshold else "complete",

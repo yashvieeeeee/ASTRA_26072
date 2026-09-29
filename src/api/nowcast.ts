@@ -1,3 +1,5 @@
+import { apiUrl, shouldUseMock } from "./client";
+import { mockNowcast } from "./mock";
 export type SourceHealthState = "complete" | "delayed" | "missing" | "synthetic" | "pending";
 
 export interface LatestNowcastResponse {
@@ -6,7 +8,7 @@ export interface LatestNowcastResponse {
   domain: { latitude: number[]; longitude: number[]; resolution_degrees: number };
   data_status: {
     overall: string;
-    sources: Array<{ source: string; state: SourceHealthState; observed_at: string | null; reason: string | null }>;
+    sources: Array<{ source: string; state: SourceHealthState; observed_at: string | null; reason: string | null; mode?: string | null; is_synthetic?: boolean | null; provider?: string | null }>;
   };
   predictions: {
     storm_probability: ProbabilityCube;
@@ -38,8 +40,12 @@ export interface TrackedStorm {
 }
 
 export async function fetchLatestNowcast(signal?: AbortSignal): Promise<LatestNowcastResponse> {
-  const response = await fetch("/api/v1/nowcast/latest", { signal, headers: { Accept: "application/json" } });
+  if (shouldUseMock() && !apiUrl("")) return mockNowcast();
+  let response: Response;
+  try { response = await fetch(apiUrl("/api/v1/nowcast/latest"), { signal, headers: { Accept: "application/json" } }); }
+  catch (error) { if (shouldUseMock()) return mockNowcast(); throw error; }
   if (!response.ok) {
+    if (shouldUseMock()) return mockNowcast();
     throw new Error(response.status === 503 ? "No live nowcast cycle is available yet." : `Latest nowcast request failed (${response.status}).`);
   }
   const nowcast = await response.json() as LatestNowcastResponse;

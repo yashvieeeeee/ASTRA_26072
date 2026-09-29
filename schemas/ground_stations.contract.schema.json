@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ASTRA ground_stations source contract",
+  "type": "object",
+  "properties": {
+    "source": {
+      "const": "ground_stations"
+    },
+    "spatial_representation": {
+      "const": "grid"
+    },
+    "mode": {
+      "enum": [
+        "sample",
+        "historical",
+        "realtime"
+      ]
+    },
+    "is_synthetic": {
+      "type": "boolean"
+    },
+    "pending_source": {
+      "const": false
+    },
+    "variables": {
+      "type": "array",
+      "const": [
+        "temperature_2m",
+        "relative_humidity",
+        "surface_pressure",
+        "wind_speed_10m",
+        "rainfall_rate",
+        "station_available"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "const": {
+        "temperature_2m": "K",
+        "relative_humidity": "%",
+        "surface_pressure": "Pa",
+        "wind_speed_10m": "m s-1",
+        "rainfall_rate": "mm hr-1",
+        "station_available": "1"
+      }
+    }
+  },
+  "required": [
+    "source",
+    "mode",
+    "spatial_representation",
+    "is_synthetic",
+    "pending_source",
+    "variables",
+    "units"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "sample"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "is_synthetic": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "historical",
+              "realtime"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "is_synthetic": {
+            "const": false
+          }
+        }
+      }
+    }
+  ],
+  "xarray_required_dimensions": [
+    "time",
+    "latitude",
+    "longitude"
+  ]
+}

@@ -10,7 +10,10 @@ psycopg[binary]>=3.1
 fastapi>=0.110
 uvicorn>=0.27
 pytest>=8.0
+requests>=2.31
 cdsapi>=0.7
 eumdac==3.0.0
 satpy==0.58.0
+meteostat>=1.6,<2
+herbie-data>=2026.9
 # Optional production readers: earthaccess, herbie-data

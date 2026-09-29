@@ -1,11 +1,14 @@
 {
-  "satellite_provider": "eumetsat_iodc",
+  "satellite_provider": "eumetsat",
+  "nwp_realtime_provider": "gfs_herbie",
   "eumetsat_iodc": {
     "historical_url": "https://your-staged-eumetsat-iodc-archive.nc",
     "latest_url": "https://your-staged-eumetsat-iodc-latest.nc"
   },
   "mosdac": {
-    "historical_url": "https://your-mosdac-archive.nc",
-    "latest_url": "https://your-mosdac-latest.nc"
+    "historical_url": "data/mosdac/staged/historical.zarr",
+    "latest_url": "data/mosdac/staged/latest.zarr",
+    "dataset_ids": ["3RIMG_L1C_ASIA_MER"],
+    "bounding_box": "68.0,6.0,98.0,38.0"
   }
 }

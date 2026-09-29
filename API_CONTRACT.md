@@ -4,7 +4,7 @@ Base path: `/api/v1`. The API is backend-only and serves only the canonical pan-
 
 ## `GET /nowcast/latest`
 
-Returns `200` with `NowcastResponse`, or `503 NO_CURRENT_CYCLE` when no real Phase 3+4 artifact has been published. There is no sample/mock fallback. `predictions` contains ordered 10–60 minute storm/lightning probability and confidence grids, while `storms` contains tracked-object/risk output. `data_status.sources` always lists `gpm_imerg`, `insat_3d_3dr`, `synthetic_lightning`, `ground_stations_pending`, and `nwp`; the frontend must show degraded/stale status whenever `data_status.overall` is not `complete`.
+Returns `200` with `NowcastResponse`, or `503 NO_CURRENT_CYCLE` when no real Phase 3+4 artifact has been published. There is no sample/mock fallback. `predictions` contains ordered 10–60 minute storm/lightning probability and confidence grids, while `storms` contains tracked-object/risk output. `data_status.sources` always lists `gpm_imerg`, `insat_3d_3dr`, `synthetic_lightning`, `ground_stations`, and `nwp`; the frontend must show degraded/stale status whenever `data_status.overall` is not `complete`.
 
 ## `GET /warnings/drafts`
 

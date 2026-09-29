@@ -4,7 +4,7 @@ import json,sqlite3,threading
 from pathlib import Path
 from .schemas import NowcastResponse, WarningDraft, WarningDecisionRequest, AuditEvent, SourceState
 
-REQUIRED_SOURCES={"gpm_imerg","insat_3d_3dr","synthetic_lightning","ground_stations_pending","nwp"}
+REQUIRED_SOURCES={"gpm_imerg","insat_3d_3dr","synthetic_lightning","ground_stations","nwp"}
 class NowcastStore:
     def __init__(self): self._latest=None; self._lock=threading.Lock()
     def publish(self, artifact: dict|NowcastResponse):

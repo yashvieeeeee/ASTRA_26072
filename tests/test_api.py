@@ -5,7 +5,7 @@ from astra_pipeline.domain import LATITUDES,LONGITUDES
 
 def artifact():
     panel=[[.1]*121 for _ in range(129)]; cube=[panel]*6
-    return {"cycle_id":"cycle-1","generated_at":datetime.now(timezone.utc).isoformat(),"domain":{"latitude":LATITUDES.tolist(),"longitude":LONGITUDES.tolist()},"data_status":{"overall":"degraded","sources":[{"source":"gpm_imerg","state":"complete","mode":"realtime","is_synthetic":False},{"source":"insat_3d_3dr","state":"complete","mode":"realtime","is_synthetic":False},{"source":"synthetic_lightning","state":"synthetic","reason":"proxy","mode":"realtime","is_synthetic":True},{"source":"ground_stations_pending","state":"pending","reason":"source unresolved","mode":"realtime","is_synthetic":False},{"source":"nwp","state":"delayed","reason":"late","mode":"realtime","is_synthetic":False}]},"predictions":{"storm_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"storm_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube}},"storms":[]}
+    return {"cycle_id":"cycle-1","generated_at":datetime.now(timezone.utc).isoformat(),"domain":{"latitude":LATITUDES.tolist(),"longitude":LONGITUDES.tolist()},"data_status":{"overall":"degraded","sources":[{"source":"gpm_imerg","provider":"gpm_imerg","state":"complete","mode":"realtime","is_synthetic":False},{"source":"insat_3d_3dr","provider":"mosdac","state":"complete","mode":"realtime","is_synthetic":False},{"source":"synthetic_lightning","provider":"lightning_proxy","state":"synthetic","reason":"proxy","mode":"realtime","is_synthetic":True},{"source":"ground_stations","provider":"meteostat","state":"missing","reason":"Meteostat station coverage sparse","mode":"realtime","is_synthetic":False},{"source":"nwp","provider":"open_meteo","state":"delayed","reason":"late","mode":"realtime","is_synthetic":False}]},"predictions":{"storm_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_probability":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"storm_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube},"lightning_confidence":{"lead_minutes":[10,20,30,40,50,60],"values":cube}},"storms":[]}
 
 def test_complete_sample_provenance_is_rejected(tmp_path):
     app=create_app(audit_database=str(tmp_path/'audit.db'))
@@ -25,6 +25,7 @@ def test_latest_refuses_missing_cycle_and_serves_full_domain(tmp_path):
     app.state.nowcast_store.publish(artifact()); response=client.get('/api/v1/nowcast/latest')
     assert response.status_code==200 and response.json()['domain']['latitude']==LATITUDES.tolist()
     assert response.json()['data_status']['overall']=='degraded'
+    assert response.json()['data_status']['sources'][1]['provider']=='mosdac'
     assert not any(key in response.text.lower() for key in ['"mock"','"debug"','"sample"'])
 
 def test_decisions_need_explicit_actor_are_audited_and_never_transmitted(tmp_path):
