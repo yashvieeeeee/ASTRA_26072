@@ -2,32 +2,26 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 from .schemas import NowcastResponse, WarningDecisionRequest, WarningDraft, AuditEvent
 from .store import NowcastStore, WarningRepository
 from .weatherbit import WeatherbitLightningClient, WeatherbitUnavailable
 from .weatherapi import WeatherAPIClient, WeatherAPIUnavailable
 
-def create_app(*, artifact_path: str|None=None, audit_database: str|None=None):
+READ_ONLY_MESSAGE = "Warning drafts and audit history are unavailable in this read-only deployment."
+
+def create_app(*, artifact_path: str|None=None, audit_database: str|None=None, read_only: bool | None = None):
     """Production API factory. It never generates samples or exposes diagnostic routes."""
     app=FastAPI(title="ASTRA Nowcast API",version="1.0.0",openapi_url="/openapi.json",docs_url="/docs")
-    cors_origins = [origin.strip() for origin in os.getenv("ASTRA_CORS_ORIGINS", "").split(",") if origin.strip()]
-    if cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=False,
-            allow_methods=["GET", "POST"],
-            allow_headers=["Content-Type", "Accept"],
-        )
-    store=NowcastStore(); repository=WarningRepository(audit_database or os.getenv("ASTRA_AUDIT_DB","astra_audit.sqlite3"))
+    read_only = (os.getenv("VERCEL") == "1") if read_only is None else read_only
+    store=NowcastStore()
+    repository = None if read_only else WarningRepository(audit_database or os.getenv("ASTRA_AUDIT_DB","astra_audit.sqlite3"))
     artifact=artifact_path or os.getenv("ASTRA_NOWCAST_ARTIFACT")
     if artifact:
         path = Path(artifact)
         if not path.is_file():
             raise RuntimeError(f"ASTRA_NOWCAST_ARTIFACT must be an existing JSON file; got {path}")
         store.load_json(path)
-    app.state.nowcast_store=store; app.state.warning_repository=repository
+    app.state.nowcast_store=store; app.state.warning_repository=repository; app.state.read_only=read_only
     # This client tracks only request timestamps in memory. It is intentionally
     # separate from nowcast artifacts and the audit database.
     app.state.weatherbit_lightning=WeatherbitLightningClient()
@@ -35,7 +29,15 @@ def create_app(*, artifact_path: str|None=None, audit_database: str|None=None):
 
     @app.get("/healthz", include_in_schema=False)
     def healthcheck():
-        return {"status": "ok", "nowcast_loaded": app.state.nowcast_store.latest() is not None}
+        response = {"status": "ok", "nowcast_loaded": app.state.nowcast_store.latest() is not None}
+        if app.state.read_only:
+            response["write_capability"] = "unavailable"
+        return response
+
+    def require_writable_repository():
+        if app.state.read_only:
+            raise HTTPException(503, detail={"code": "READ_ONLY_DEPLOYMENT", "message": READ_ONLY_MESSAGE})
+        return repository
 
     @app.get("/api/v1/nowcast/latest",response_model=NowcastResponse,responses={503:{"description":"No real Phase 3+4 cycle is published"}})
     def latest_nowcast():
@@ -57,15 +59,15 @@ def create_app(*, artifact_path: str|None=None, audit_database: str|None=None):
         except WeatherAPIUnavailable as exc:
             raise HTTPException(exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
     @app.get("/api/v1/warnings/drafts",response_model=list[WarningDraft])
-    def list_drafts(): return repository.drafts()
+    def list_drafts(): return require_writable_repository().drafts()
     @app.post("/api/v1/warnings/{warning_id}/decision",response_model=WarningDraft)
     def warning_decision(warning_id: str, request: WarningDecisionRequest):
-        try: warning=repository.decide(warning_id,request)
+        try: warning=require_writable_repository().decide(warning_id,request)
         except ValueError as exc: raise HTTPException(409,detail=str(exc))
         if warning is None: raise HTTPException(404,detail="Warning draft not found")
         return warning
     @app.get("/api/v1/audit/warning-decisions",response_model=list[AuditEvent])
-    def warning_audit(warning_id: str|None=None, limit: int=Query(100,ge=1,le=1000)): return repository.audit(warning_id,limit)
+    def warning_audit(warning_id: str|None=None, limit: int=Query(100,ge=1,le=1000)): return require_writable_repository().audit(warning_id,limit)
     return app
 
 app=create_app()

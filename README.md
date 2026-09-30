@@ -188,4 +188,19 @@ can return a cycle. The named `astra_audit` volume persists the SQLite audit
 database for a single API replica; use a managed transactional database before
 running multiple API replicas.
 
+### Vercel Services
+
+`vercel.json` deploys the Vite app at `/` and FastAPI at `/api/*`. The frontend
+uses the existing relative `/api/...` URLs, so no CORS configuration or
+browser-to-service binding is needed. `archive/ASTRA_figma_design` is excluded
+from this deployment.
+
+On Vercel, the API automatically runs read-only because local SQLite and a
+mounted artifact file are not durable serverless storage. Consequently,
+`/api/v1/warnings/drafts`, `/api/v1/audit/warning-decisions`, and warning
+decision `POST`s return `503 READ_ONLY_DEPLOYMENT`; no local database is
+created. `/api/v1/nowcast/latest` returns `503 NO_CURRENT_CYCLE` until a
+durable artifact source is introduced. Configure third-party corroboration
+keys only through Vercel Project Environment Variables, never in this repo.
+
 `GET /api/v1/nowcast/latest` returns a validated canonical pan-India artifact, including all four six-lead probability/confidence cubes, tracked/risk-ranked storms and five-source data status. If no real artifact exists it returns `503`, rather than creating a demo result. Warning decisions are available only through `POST /api/v1/warnings/{warning_id}/decision`; they are audit-recorded and never transmit a warning. The API audit found no pre-existing backend in this checkout. The Mumbai-specific fixture is in the separately managed frontend `app.js`, which this work leaves untouched.
