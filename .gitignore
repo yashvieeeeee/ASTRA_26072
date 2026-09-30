@@ -9,6 +9,7 @@ __pycache__/
 data/
 !data/
 !data/*.geojson
+data/critical_infrastructure.geojson
 !data/atmospheric/
 !data/atmospheric/*.csv
 data/raw/iss_lis/
