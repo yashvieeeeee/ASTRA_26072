@@ -1,5 +1,3 @@
-@import 'tailwindcss';
-
 .lightning-corroboration{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:14px 0;border-bottom:1px solid var(--line)}.lightning-corroboration>span{font:var(--type-chrome) var(--mono);letter-spacing:.11em;color:var(--cyan)}.lightning-corroboration>em{font:var(--type-chrome) var(--mono);font-style:normal;color:var(--gold);letter-spacing:.08em}.lightning-corroboration>p,.corroboration-status{margin:0;color:var(--soft);font-size:var(--type-chrome)}.corroboration-status.unavailable{display:flex;flex-direction:column;gap:8px;color:var(--gold)}.corroboration-result{display:grid;grid-template-columns:auto 1fr;gap:3px 9px;align-items:center;width:100%}.corroboration-result strong{grid-row:span 2;font:var(--type-display) var(--mono);color:var(--cyan)}.corroboration-result span,.corroboration-result small{font:var(--type-chrome) var(--mono);color:var(--soft)}.corroboration-result small{color:var(--muted)}.corroboration-result .action{grid-column:1/-1;margin-top:5px}
 
 .astra-app :is(span, em, small, button, label, text) { font-weight: 600; }

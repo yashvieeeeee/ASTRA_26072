@@ -9,6 +9,11 @@ __pycache__/
 data/
 !data/
 !data/*.geojson
+!data/atmospheric/
+!data/atmospheric/*.csv
+data/raw/iss_lis/
+data/processed/
+isslis_v3_fin_3-*/
 !src/data/
 !src/data/*.ts
 var/

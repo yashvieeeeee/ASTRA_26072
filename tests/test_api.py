@@ -28,6 +28,14 @@ def test_latest_refuses_missing_cycle_and_serves_full_domain(tmp_path):
     assert response.json()['data_status']['sources'][1]['provider']=='mosdac'
     assert not any(key in response.text.lower() for key in ['"mock"','"debug"','"sample"'])
 
+def test_healthcheck_and_configured_cors(tmp_path, monkeypatch):
+    monkeypatch.setenv("ASTRA_CORS_ORIGINS", "https://astra.example")
+    client = TestClient(create_app(audit_database=str(tmp_path / "audit.db")))
+    assert client.get("/healthz").json() == {"status": "ok", "nowcast_loaded": False}
+    response = client.options("/api/v1/warnings/drafts", headers={"Origin": "https://astra.example", "Access-Control-Request-Method": "GET"})
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://astra.example"
+
 def test_decisions_need_explicit_actor_are_audited_and_never_transmitted(tmp_path):
     app=create_app(audit_database=str(tmp_path/'audit.db')); app.state.warning_repository.create('warn-1',{'tier':'high'}); client=TestClient(app)
     response=client.post('/api/v1/warnings/warn-1/decision',json={'actor_id':'forecaster-7','decision':'approve'})

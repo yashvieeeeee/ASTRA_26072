@@ -1,9 +1,20 @@
 import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 
-import siteConfiguration from './.figma/make/site.json'
+// Figma Make writes this local file, but it is intentionally not committed.
+// A deployment checkout must still be able to build without it.
+const siteConfigurationPath = path.resolve(__dirname, '.figma/make/site.json')
+const siteConfiguration: FigmaSiteConfiguration = existsSync(siteConfigurationPath)
+  ? JSON.parse(readFileSync(siteConfigurationPath, 'utf8'))
+  : {}
+const apiProxy = {
+  '/api': {
+    target: process.env.ASTRA_API_URL || 'http://127.0.0.1:8000',
+    changeOrigin: true,
+  },
+}
 
 
 // Vite config — https://vitejs.dev/config/
@@ -18,8 +29,7 @@ export default defineConfig(({ mode }) => {
       minify: !emitSourcemaps,
     },
     plugins: [
-react(),
-      tailwindcss(),
+      react(),
       figmaSiteConfiguration(siteConfiguration),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
@@ -34,12 +44,7 @@ react(),
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
       strictPort: true,
-      proxy: {
-        '/api': {
-          target: process.env.ASTRA_API_URL || 'http://127.0.0.1:8000',
-          changeOrigin: true,
-        },
-      },
+      proxy: apiProxy,
       watch: {
         ignored: [
           '**/.figma/**',
@@ -49,6 +54,7 @@ react(),
     preview: {
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
+      proxy: apiProxy,
     },
   }
 })
@@ -92,7 +98,7 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
     return html.replace(`<!-- ${slotName} -->`, content)
   }
 
-  const title = config.title ?? "Figma Make App"
+  const title = config.title ?? "ASTRA - SIH26072"
   const description = config.description ?? ''
   const favicon = config.icons?.icon ?? ''
   const socialImage = config.openGraph?.image ?? ''

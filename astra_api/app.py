@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from .schemas import NowcastResponse, WarningDecisionRequest, WarningDraft, AuditEvent
 from .store import NowcastStore, WarningRepository
 from .weatherbit import WeatherbitLightningClient, WeatherbitUnavailable
@@ -10,6 +11,15 @@ from .weatherapi import WeatherAPIClient, WeatherAPIUnavailable
 def create_app(*, artifact_path: str|None=None, audit_database: str|None=None):
     """Production API factory. It never generates samples or exposes diagnostic routes."""
     app=FastAPI(title="ASTRA Nowcast API",version="1.0.0",openapi_url="/openapi.json",docs_url="/docs")
+    cors_origins = [origin.strip() for origin in os.getenv("ASTRA_CORS_ORIGINS", "").split(",") if origin.strip()]
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type", "Accept"],
+        )
     store=NowcastStore(); repository=WarningRepository(audit_database or os.getenv("ASTRA_AUDIT_DB","astra_audit.sqlite3"))
     artifact=artifact_path or os.getenv("ASTRA_NOWCAST_ARTIFACT")
     if artifact:
@@ -22,6 +32,10 @@ def create_app(*, artifact_path: str|None=None, audit_database: str|None=None):
     # separate from nowcast artifacts and the audit database.
     app.state.weatherbit_lightning=WeatherbitLightningClient()
     app.state.weatherapi_conditions=WeatherAPIClient()
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthcheck():
+        return {"status": "ok", "nowcast_loaded": app.state.nowcast_store.latest() is not None}
 
     @app.get("/api/v1/nowcast/latest",response_model=NowcastResponse,responses={503:{"description":"No real Phase 3+4 cycle is published"}})
     def latest_nowcast():

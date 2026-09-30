@@ -1,0 +1,17 @@
+.git
+.agents
+.figma
+.venv*
+.pytest_cache
+node_modules
+dist
+var
+data
+archive
+brag-output
+eumdac
+isslis_v3_fin_3-*/
+config.json
+*.sqlite3
+*.sqlite
+.env

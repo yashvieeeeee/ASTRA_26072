@@ -12,6 +12,38 @@ python -m pytest
 
 The `sample` adapters generate a small deterministic five-timestep data cube. It exercises GPM-like rain, the three INSAT channels, a CAPE × rainfall lightning proxy, a CI-only Meteostat station fixture, and ERA5/GFS-like model fields. It deliberately covers the entire domain and emits JSON schemas in `schemas/`.
 
+## Historical Open-Meteo atmospheric context
+
+`data/atmospheric/open_meteo_india_5_locations.csv` is a five-location (Mumbai, Delhi, Kolkata, Chennai, and Bhopal) **hourly Open-Meteo historical/model-derived atmospheric archive**. It is not live data, direct sensor observation, a forecast feed, or a lightning dataset. The raw two-section provider export is retained unchanged; `astra_pipeline/atmospheric.py` reads it into a separate normalised point representation while preserving raw column names and missing values as `NaN`.
+
+The loader preserves location ID, latitude, longitude, and converts provider-local timestamps to UTC. It validates required fields, valid coordinates, unique location IDs, parseable timestamps, duplicate location/timestamp records, missing-value percentages, and records after the validation time. It does not interpolate, forward-fill, or manufacture future values. Normalised fields cover basic thermodynamics, pressure, precipitation, cloud, wind, visibility, supported pressure-level temperature/RH/wind-speed fields, plus supported derived temperature differences/lapse-rate proxies, moisture gradients, and 10 m wind vectors. This export has no pressure-level wind directions, so vertical vector wind shear is intentionally absent.
+
+It is intentionally **not** a `default_adapters()` source: five points cannot meet ASTRA's fixed pan-India 0.25° grid contract without unsafe interpolation. It is reusable standalone ingestion for later grid archives, and can be joined as context only after a downstream design explicitly handles sparse points. It must never be used to fabricate CAPE/CIN, radar, satellite, or lightning observations; NRSC/ISRO lightning remains a separate future source.
+
+Preview the archive and its provenance/completeness with:
+
+```powershell
+python scripts/preview_open_meteo_atmospheric.py
+```
+
+## Historical NASA ISS-LIS lightning observations
+
+`astra_pipeline/iss_lis.py` ingests **NASA ISS-LIS V3.0 historical satellite lightning observations** for training, validation, climatology/context, feature engineering, and future-label generation. It is observed (`observed: true`), historical (`forecast: false`), and non-synthetic. It is not an operational live lightning feed and does not replace the explicitly labelled synthetic CI fixture until a training artifact is built from processed observations.
+
+The canonical input is NetCDF. A representative V3.0 file contains event, group, flash, orbit, and 0.5° viewtime records; the event pipeline uses actual `lightning_event_TAI93_time`, latitude/longitude, addresses, radiance/footprint, alert, clustering, and noise fields. Event-to-flash IDs are resolved through the source group-parent relationship. There is no reliable cloud-to-ground/cloud-to-cloud type field in this schema, so ASTRA does not invent one. HDF4 copies are not processed alongside paired NetCDF files, preventing duplicate observations.
+
+Raw ISS-LIS files belong outside Git (for example `data/raw/iss_lis/`, which is ignored). The streaming command processes one granule at a time, writes Parquet event partitions, records each result in `processed_files.csv`, and produces configurable grid/temporal aggregates plus causally safe historical lightning features. The current India filter is explicitly a configurable **bounding box**, not an India polygon: west 68.1, south 6.7, east 97.5, north 37.1. Replace it with an official boundary before treating the filter as exact India coverage.
+
+```powershell
+# First validate a small subset.
+python scripts/ingest_iss_lis.py --input-dir C:\path\to\iss_lis --output-dir data\processed\iss_lis --limit 10
+
+# Continue after a successful review; successful manifest rows are not repeated.
+python scripts/ingest_iss_lis.py --input-dir C:\path\to\iss_lis --output-dir data\processed\iss_lis --resume --resolution 0.25 --interval 5min
+```
+
+The generated `lightning_features_*` uses only observations at or before each bucket timestamp (5/10/30/60-minute rolling counts, growth, and acceleration). A future target, such as activity in T→T+30 minutes, must be created in a separate join after the prediction-time feature row is fixed; this prevents target leakage. Atmospheric Open-Meteo data can only be aligned explicitly by UTC time and grid/location, accounting for its hourly five-point coverage—it must never be blindly merged with the higher-frequency satellite observations.
+
 ## Contracts and pipeline
 
 `astra_pipeline/contracts.py` contains Pydantic metadata contracts and `DatasetContract` validation for every xarray payload. `SourceMetadata.model_json_schema()` and `FusedOutputMetadata.model_json_schema()` produce the source/fused JSON Schemas; the demo also writes one fixed JSON Schema per source in `schemas/`. Before fusion, every adapter is schema-validated. Processing is quality check → 0.25° regrid → 30-minute nearest-bucket alignment → point binning → derived 1000–500 mb bulk shear → lazy normalisation → four-frame last-hour sequences.
@@ -130,5 +162,30 @@ $env:ASTRA_NOWCAST_ARTIFACT='C:\secure\latest-phase3-phase4.json'
 $env:ASTRA_AUDIT_DB='C:\secure\astra_audit.sqlite3'
 python scripts/serve_api.py
 ```
+
+## Deployment
+
+The repository includes a two-container deployment. Nginx serves the static
+frontend and proxies `/api/` to FastAPI over the private container network, so
+browser requests remain same-origin and do not need CORS.
+
+```powershell
+Copy-Item .env.example .env
+# Place a validated artifact in .\artifacts\latest-phase3-phase4.json, then
+# set ASTRA_NOWCAST_ARTIFACT=/app/artifacts/latest-phase3-phase4.json in .env.
+docker compose up --build -d
+```
+
+The application is then available at `http://localhost:8080`; `GET /healthz`
+is the container health endpoint. The API is deliberately not published as a
+host port. If it must be exposed separately, set `ASTRA_CORS_ORIGINS` to a
+comma-separated allow-list of exact frontend origins—never `*` in a deployment
+that handles authenticated traffic.
+
+`ASTRA_NOWCAST_ARTIFACT` is optional for process startup, but it must point to
+a mounted, validated Phase 3+4 JSON artifact before the live-nowcast endpoint
+can return a cycle. The named `astra_audit` volume persists the SQLite audit
+database for a single API replica; use a managed transactional database before
+running multiple API replicas.
 
 `GET /api/v1/nowcast/latest` returns a validated canonical pan-India artifact, including all four six-lead probability/confidence cubes, tracked/risk-ranked storms and five-source data status. If no real artifact exists it returns `503`, rather than creating a demo result. Warning decisions are available only through `POST /api/v1/warnings/{warning_id}/decision`; they are audit-recorded and never transmit a warning. The API audit found no pre-existing backend in this checkout. The Mumbai-specific fixture is in the separately managed frontend `app.js`, which this work leaves untouched.
